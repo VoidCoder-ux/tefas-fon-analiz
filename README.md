@@ -26,6 +26,11 @@ risk metriklerini tek sayfada gösterir.
 | **Fonlar** | TEFAS'taki ~2.400 fonun tamamında arama, filtreleme, sıralama ve fon detayı |
 | **Ayarlar** | Profiller, tema, yedek al/yükle, Excel-CSV'den toplu işlem aktarma |
 
+Üst çubuktaki **↻** düğmesi verileri sunucudan yeniden çeker. Telefonda "Ana Ekrana
+Ekle" ile uygulama gibi kullanıldığında tarayıcı arayüzü olmadığı için sayfayı
+yenilemenin başka yolu yoktur; bu düğme onun yerini tutar. Sayfa baştan yüklenmez,
+yalnızca veri tazelenir - bulunduğun sekme ve işlemlerin korunur.
+
 ---
 
 ## Kurulum (tek seferlik, ~5 dakika)

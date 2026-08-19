@@ -104,7 +104,9 @@ button, select, input { font: inherit; color: inherit; }
 
 .topbar-inner {
   max-width: 1280px; margin: 0 auto;
-  padding: 10px 16px;
+  /* Ana ekrana eklenmiş iOS uygulamasında sayfa çentiğin altına uzanır;
+     güvenli alan kadar boşluk bırakılmazsa üst bar çentiğe giriyor. */
+  padding: calc(10px + env(safe-area-inset-top)) 16px 10px;
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
 }
 
@@ -134,6 +136,8 @@ select:focus, .input:focus, input:focus { border-color: var(--accent); box-shado
   background: var(--surface); cursor: pointer;
 }
 .icon-btn:hover { background: var(--surface-2); }
+.icon-btn:disabled { opacity: .55; cursor: default; }
+.icon-btn.spinning { animation: spin .7s linear infinite; }
 
 .tabs {
   max-width: 1280px; margin: 0 auto;
@@ -372,7 +376,8 @@ td.name { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-spa
 /* --------------------------------------------------------------------- alt bilgi */
 
 .footer {
-  max-width: 1280px; margin: 0 auto; padding: 0 16px 34px;
+  max-width: 1280px; margin: 0 auto;
+  padding: 0 16px calc(34px + env(safe-area-inset-bottom));
   color: var(--text-dim); font-size: .78rem;
 }
 .footer p { margin: 4px 0; }
@@ -382,6 +387,8 @@ td.name { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-spa
 
 @media (max-width: 640px) {
   .app { padding: 14px 11px 32px; }
+  /* Parmakla basılacak hedefler büyütülür (Apple önerisi ~44px). */
+  .icon-btn { width: 42px; height: 42px; font-size: 1.05rem; }
   .card { padding: 13px; }
   .kpi-value { font-size: 1.3rem; }
   .brand-text { display: none; }

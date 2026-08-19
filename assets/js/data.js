@@ -18,19 +18,23 @@ export const DB = {
 const historyCache = new Map();     // kod -> { i, p, filled }
 const pending = new Map();          // kod -> Promise
 
-async function getJSON(path) {
-  const res = await fetch(DATA_URL + path, { cache: 'no-cache' });
+async function getJSON(path, { bypassCache = false } = {}) {
+  // 'reload' tarayıcı önbelleğini tamamen atlar; iOS'ta ana ekrana eklenmiş
+  // uygulamada elle yenileme yapılamadığı için bu şart.
+  const url = DATA_URL + path + (bypassCache ? `?t=${Date.now()}` : '');
+  const res = await fetch(url, { cache: bypassCache ? 'reload' : 'no-cache' });
   if (!res.ok) throw new Error(`${path} yüklenemedi (HTTP ${res.status})`);
   return res.json();
 }
 
 /** Uygulama açılışında gereken küçük dosyaları yükler. */
-export async function loadCore() {
+export async function loadCore({ bypassCache = false } = {}) {
+  const opt = { bypassCache };
   const [funds, calendar, benchmarks, meta] = await Promise.all([
-    getJSON('funds.json'),
-    getJSON('calendar.json'),
-    getJSON('benchmarks.json').catch(() => ({})),
-    getJSON('meta.json').catch(() => ({})),
+    getJSON('funds.json', opt),
+    getJSON('calendar.json', opt),
+    getJSON('benchmarks.json', opt).catch(() => ({})),
+    getJSON('meta.json', opt).catch(() => ({})),
   ]);
   DB.funds = funds;
   DB.calendar = calendar;
@@ -71,6 +75,19 @@ export function loadHistories(codes) {
 }
 
 export const cachedHistory = (code) => historyCache.get(code) || null;
+
+/**
+ * Tüm veriyi sunucudan yeniden çeker (önbelleği atlayarak).
+ * Önceki son veri günü ile yenisini döndürür ki arayüz "yeni veri geldi mi"
+ * sorusunu yanıtlayabilsin.
+ */
+export async function refreshData() {
+  const oncekiGun = DB.meta.lastDataDate || null;
+  historyCache.clear();
+  pending.clear();
+  await loadCore({ bypassCache: true });
+  return { oncekiGun, yeniGun: DB.meta.lastDataDate || null };
+}
 
 /**
  * Boşlukları bir önceki geçerli fiyatla doldurur (tatil/eksik gün).

@@ -1,7 +1,7 @@
 /* Uygulama çatısı: veri yükleme, sekme yönlendirme, profil ve tema yönetimi. */
 
 import { $, h, fmtDate, toast } from './util.js';
-import { loadCore, DB } from './data.js';
+import { loadCore, refreshData, DB } from './data.js';
 import { analyze } from './portfolio.js';
 import {
   transactions, profiles, activeProfileId, setActiveProfile, activeProfileName,
@@ -71,6 +71,47 @@ function stalenessNotice() {
     `Gösterilen değerler ${fmtDate(last)} kapanışına ait. `,
     'TEFAS resmî tatillerde fiyat yayımlamaz; tatil değilse otomatik güncelleme '
     + 'gecikmiş olabilir, genelde kısa sürede düzelir.');
+}
+
+/* ------------------------------------------------------------------ yenileme */
+
+/** Alt bilgideki veri durumu satırını tazeler. */
+function updateDataStatus() {
+  const status = $('#dataStatus');
+  if (!status) return;
+  status.textContent = `Veri: TEFAS · son fiyat günü ${fmtDate(DB.meta.lastDataDate)} · `
+    + `${DB.meta.fundCount ?? DB.funds.length} fon kapsanıyor`;
+}
+
+/**
+ * Verileri sunucudan yeniden çeker.
+ *
+ * iOS'ta ana ekrana eklenen uygulamada tarayıcı arayüzü olmadığı için sayfayı
+ * yenilemenin başka yolu yok; bu düğme onun yerini tutuyor. Sayfa yeniden
+ * yüklenmez, yalnızca veri tazelenip görünüm yeniden çizilir - böylece hangi
+ * sekmede olduğun ve girdiğin işlemler korunur.
+ */
+async function refresh() {
+  const btn = $('#refreshBtn');
+  if (btn.disabled) return;
+  btn.disabled = true;
+  btn.classList.add('spinning');
+  try {
+    const { oncekiGun, yeniGun } = await refreshData();
+    updateDataStatus();
+    await render();
+    if (yeniGun && oncekiGun && yeniGun > oncekiGun) {
+      toast(`Yeni veriler yüklendi: ${fmtDate(yeniGun)}`);
+    } else {
+      toast(`Veriler güncel: ${fmtDate(yeniGun)}`);
+    }
+  } catch (err) {
+    console.error(err);
+    toast('Yenilenemedi - internet bağlantını kontrol et');
+  } finally {
+    btn.classList.remove('spinning');
+    btn.disabled = false;
+  }
 }
 
 /* --------------------------------------------------------------------- tema */
@@ -172,6 +213,7 @@ async function boot() {
   applyTheme();
 
   $('#themeBtn').addEventListener('click', cycleTheme);
+  $('#refreshBtn').addEventListener('click', refresh);
   $('#profileSelect').addEventListener('change', (e) => {
     setActiveProfile(e.target.value);
     render();
@@ -195,9 +237,7 @@ async function boot() {
     return;
   }
 
-  const status = $('#dataStatus');
-  status.textContent = `Veri: TEFAS · son fiyat günü ${fmtDate(DB.meta.lastDataDate)} · `
-    + `${DB.meta.fundCount ?? DB.funds.length} fon kapsanıyor`;
+  updateDataStatus();
 
   renderProfileSelect();
   subscribe(() => renderProfileSelect());

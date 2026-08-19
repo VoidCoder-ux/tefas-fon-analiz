@@ -64,7 +64,7 @@ saklanır, birbirini görmez. Aynı portföyü paylaşmak isterseniz **Ayarlar �
 ## Nasıl çalışıyor?
 
 ```
-GitHub Actions (hafta içi 10:45 ve 22:10 TR)
+GitHub Actions (hafta içi 10:23 ve 19:22 TR)
   ├─ TEFAS API'sinden eksik günleri çek        scripts/tefas.py
   ├─ SQLite deposuna yaz (Actions cache'inde)  scripts/update.py
   ├─ Kıyas serilerini çek (Yahoo, TCMB EVDS)   scripts/benchmarks.py
@@ -184,9 +184,9 @@ Yedek dosyasını indirip diğer cihazda yükleyerek. Otomatik eşitleme yok (bu
 hiçbir yere göndermemenin bedeli).
 
 **Fon fiyatı neden bugün güncel değil?**
-TEFAS fiyatları sabah (~10:00 TR) açıklıyor; iş akışı hafta içi 10:45'te çalışıp
-veriyi çekiyor, 22:10'da bir kez daha kontrol ediyor. Hafta sonu ve resmî
-tatillerde yeni fiyat yayımlanmaz.
+TEFAS fiyatları sabah (~10:00 TR) açıklıyor; iş akışı hafta içi 10:23'te çalışıp
+veriyi çekiyor, 19:22'de doğrulama turu yapıyor. Hafta sonu ve resmî tatillerde
+yeni fiyat yayımlanmaz.
 
 **Emeklilik (BES) fonlarım da var.**
 Varsayılan olarak dahil (`YAT,EMK,BYF`). Fon kodunu yazman yeterli.

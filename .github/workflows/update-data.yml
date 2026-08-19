@@ -7,12 +7,15 @@ name: Veri güncelle ve yayınla
 on:
   schedule:
     # TEFAS fiyatları sabah (~10:00 TR) açıklanıyor ve gün boyu sabit kalıyor.
-    # Türkiye tüm yıl UTC+3'tür (yaz saati uygulaması yok).
-    # 07:45 UTC = 10:45 TR - asıl güncelleme, fiyat açıklandıktan hemen sonra.
-    - cron: '45 7 * * 1-5'
-    # 19:10 UTC = 22:10 TR - emniyet ağı: sabah gecikirse veya fiyat sonradan
-    # düzeltilirse aynı gün içinde yakalanır.
-    - cron: '10 19 * * 1-5'
+    # Türkiye tüm yıl UTC+3'tür (yaz saati uygulaması yok), saatler kaymaz.
+    #
+    # 07:23 UTC = 10:23 TR - asıl güncelleme, fiyat açıklanır açıklanmaz.
+    # Tam/yarım saat yerine tek bir dakika seçildi: GitHub'ın zamanlanmış iş
+    # kuyruğu :00 ve :30'da yoğunlaşıyor, ara dakikalar daha az gecikiyor.
+    - cron: '23 7 * * 1-5'
+    # 16:22 UTC = 19:22 TR - doğrulama turu: sabahki çalışma gecikir, atlanır
+    # ya da fiyat sonradan düzeltilirse aynı gün içinde yakalanır.
+    - cron: '22 16 * * 1-5'
   workflow_dispatch:
     inputs:
       full:

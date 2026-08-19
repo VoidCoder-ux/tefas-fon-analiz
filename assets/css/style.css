@@ -66,6 +66,12 @@ html[data-theme="dark"] {
 
 * { box-sizing: border-box; }
 
+/* [hidden] niteliği her koşulda gizlesin. Tarayıcının varsayılan
+   `[hidden] { display: none }` kuralı düşük özgüllüktedir; .modal-root gibi
+   display tanımlayan bir sınıf onu ezerse görünmez bir katman sayfayı kaplar
+   ve tüm tıklamaları yutar. */
+[hidden] { display: none !important; }
+
 body {
   margin: 0;
   background: var(--bg);
@@ -331,6 +337,8 @@ td.name { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-spa
 .notice.warn { border-left-color: var(--warn); }
 
 /* --------------------------------------------------------------------- modal */
+
+.modal-root[hidden] { display: none; }
 
 .modal-root {
   position: fixed; inset: 0; z-index: 60;

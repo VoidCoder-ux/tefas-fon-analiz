@@ -30,6 +30,49 @@ let currentView = 'panel';
 let prefillCode = null;
 let rendering = false;
 
+/* ---------------------------------------------------------------- veri tazeliği */
+
+/**
+ * Cihazın saat dilimi ne olursa olsun Türkiye saatine göre "şimdi".
+ * Ailenin biri yurt dışındayken de doğru karar verilsin diye gerekli.
+ */
+function istanbulNow() {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Europe/Istanbul', year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', hour12: false,
+    }).formatToParts(new Date()).map((p) => [p.type, p.value]));
+  const date = `${parts.year}-${parts.month}-${parts.day}`;
+  return {
+    date,
+    minutes: Number(parts.hour) * 60 + Number(parts.minute),
+    weekday: new Date(`${date}T00:00:00`).getDay(),      // 0 Pazar, 6 Cumartesi
+  };
+}
+
+/**
+ * Gösterilen fiyatlar bugünün fiyatı değilse kullanıcıyı bilgilendirir.
+ *
+ * TEFAS fiyatları sabah ~10:00'da açıklıyor ve gün boyu değişmiyor; otomatik
+ * güncelleme 10:23'te çalışıyor. Saat 11:00'ı geçtiği hâlde bugünün verisi
+ * yoksa ya resmî tatil ya da güncelleme gecikmiş demektir. Sessizce eski
+ * fiyatı göstermek yerine bunu açıkça söylüyoruz.
+ */
+function stalenessNotice() {
+  const last = DB.meta.lastDataDate;
+  if (!last) return null;
+  const { date, minutes, weekday } = istanbulNow();
+  if (last >= date) return null;                       // bugünün verisi mevcut
+  const isWeekday = weekday >= 1 && weekday <= 5;
+  if (!isWeekday || minutes < 11 * 60) return null;    // hafta sonu ya da daha erken
+
+  return h('div', { class: 'notice warn', style: 'margin-bottom:14px' },
+    h('b', {}, 'Bugünün fiyatları henüz yansımadı. '),
+    `Gösterilen değerler ${fmtDate(last)} kapanışına ait. `,
+    'TEFAS resmî tatillerde fiyat yayımlamaz; tatil değilse otomatik güncelleme '
+    + 'gecikmiş olabilir, genelde kısa sürede düzelir.');
+}
+
 /* --------------------------------------------------------------------- tema */
 
 function applyTheme() {
@@ -108,7 +151,8 @@ async function render() {
     }
 
     const node = view.render(ctx);
-    app.replaceChildren(node);
+    const uyari = stalenessNotice();
+    app.replaceChildren(...(uyari ? [uyari, node] : [node]));
     prefillCode = null;
     window.scrollTo({ top: 0, behavior: 'auto' });
   } catch (err) {

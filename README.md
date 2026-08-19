@@ -183,6 +183,13 @@ Tarayıcı verilerini temizlersen kaybolur — bu yüzden ara ara **Ayarlar → 
 Yedek dosyasını indirip diğer cihazda yükleyerek. Otomatik eşitleme yok (bu, veriyi
 hiçbir yere göndermemenin bedeli).
 
+**Uygulama her açılışta TEFAS'a bağlanıp fiyat çekemez mi?**
+Hayır - TEFAS API'si tarayıcıya CORS izni vermiyor (`access-control-allow-origin`
+başlığı göndermiyor), bu yüzden sayfa doğrudan istek atamaz. Zaten gerek de yok:
+TEFAS bir günün fiyatını sabah bir kez açıklıyor ve o fiyat gün boyu değişmiyor,
+dolayısıyla her açılışta sorgulamak aynı sayıları geri getirirdi. Uygulama, bugünün
+fiyatı henüz yansımamışsa üstte bir uyarı göstererek seni bilgilendirir.
+
 **Fon fiyatı neden bugün güncel değil?**
 TEFAS fiyatları sabah (~10:00 TR) açıklıyor; iş akışı hafta içi 10:23'te çalışıp
 veriyi çekiyor, 19:22'de doğrulama turu yapıyor. Hafta sonu ve resmî tatillerde

@@ -160,7 +160,10 @@ export function renderFonlar(ctx) {
           key: 'code', label: 'Kod', defaultDir: 'asc',
           render: (f) => h('span', {},
             h('span', { class: 'code-chip' }, f.code),
-            mine.has(f.code) ? h('span', { class: 'pill up', style: 'margin-left:6px' }, 'portföyümde') : null),
+            mine.has(f.code) ? h('span', { class: 'pill up', style: 'margin-left:6px' }, 'portföyümde') : null,
+            f.date !== DB.meta.lastDataDate
+              ? h('span', { class: 'pill', style: 'margin-left:6px', title: `Son fiyat ${f.date}` }, 'kapanmış')
+              : null),
         },
         {
           key: 'name', label: 'Ünvan', defaultDir: 'asc', align: 'left',

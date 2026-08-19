@@ -22,16 +22,39 @@ function parseNumber(raw) {
   return Number(text.includes(',') ? text.replace(/\./g, '').replace(',', '.') : text);
 }
 
+/**
+ * CSV satırlarının ayracını belirler.
+ *
+ * Virgül ayraç olarak KULLANILAMAZ diye varsayılamaz: Türkçe sayılarda virgül
+ * ondalık ayracıdır ("1.250,5"). Bu yüzden önce noktalı virgül ve sekme aranır
+ * (Excel'in Türkçe yereldeki varsayılanı noktalı virgüldür); yalnızca hiçbiri
+ * yoksa virgüle düşülür.
+ */
+function ayracBelirle(metin) {
+  if (metin.includes(';')) return ';';
+  if (metin.includes('\t')) return '\t';
+  return ',';
+}
+
+/** "YYYY-AA-GG" gerçekten var olan bir tarih mi? (31.02 gibi girdileri eler) */
+function gecerliTarih(iso) {
+  const [y, a, g] = iso.split('-').map(Number);
+  const d = new Date(Date.UTC(y, a - 1, g));
+  return d.getUTCFullYear() === y && d.getUTCMonth() === a - 1 && d.getUTCDate() === g;
+}
+
 /** "kod;tarih;tür;adet;fiyat;masraf" satırlarını işleme alır. */
 function parseCSV(text) {
   const rows = [];
   const errors = [];
   const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const ayrac = ayracBelirle(text);
+  const bugun = new Date().toISOString().slice(0, 10);
 
   lines.forEach((line, i) => {
     // Başlık satırını atla.
     if (i === 0 && /kod|fon/i.test(line) && /tarih/i.test(line)) return;
-    const parts = line.split(/[;,\t]/).map((s) => s.trim());
+    const parts = line.split(ayrac).map((s) => s.trim());
     if (parts.length < 5) { errors.push(`${i + 1}. satır: en az 5 sütun olmalı`); return; }
 
     const [rawCode, rawDate, rawType, rawUnits, rawPrice, rawFee] = parts;
@@ -39,15 +62,24 @@ function parseCSV(text) {
     if (!DB.byCode.get(code)) { errors.push(`${i + 1}. satır: ${code} bulunamadı`); return; }
 
     let date = rawDate;
-    const dotted = rawDate.match(/^(\d{2})[./](\d{2})[./](\d{4})$/);
-    if (dotted) date = `${dotted[3]}-${dotted[2]}-${dotted[1]}`;
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) { errors.push(`${i + 1}. satır: tarih okunamadı`); return; }
+    const dotted = rawDate.match(/^(\d{1,2})[./](\d{1,2})[./](\d{4})$/);
+    if (dotted) {
+      date = `${dotted[3]}-${dotted[2].padStart(2, '0')}-${dotted[1].padStart(2, '0')}`;
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !gecerliTarih(date)) {
+      errors.push(`${i + 1}. satır: geçersiz tarih (${rawDate})`); return;
+    }
+    if (date > bugun) {
+      errors.push(`${i + 1}. satır: tarih gelecekte (${rawDate})`); return;
+    }
 
     const type = /^s/i.test(rawType) ? 'SAT' : 'AL';
     const units = parseNumber(rawUnits);
     const price = parseNumber(rawPrice);
     const fee = parseNumber(rawFee || '0') || 0;
-    if (!(units > 0) || !(price > 0)) { errors.push(`${i + 1}. satır: adet/fiyat geçersiz`); return; }
+    if (!(units > 0)) { errors.push(`${i + 1}. satır: adet geçersiz (${rawUnits})`); return; }
+    if (!(price > 0)) { errors.push(`${i + 1}. satır: fiyat geçersiz (${rawPrice})`); return; }
+    if (!(fee >= 0)) { errors.push(`${i + 1}. satır: masraf geçersiz (${rawFee})`); return; }
 
     rows.push({ code, date, type, units, price, fee });
   });
@@ -55,43 +87,61 @@ function parseCSV(text) {
   return { rows, errors };
 }
 
-function csvImportDialog(onDone) {
+/**
+ * Toplu işlem içe aktarma penceresi.
+ *
+ * İçe aktarma sonrası pencere KAPANMAZ: aksi hâlde atlanan satırların raporu
+ * anında yok oluyor ve kullanıcı hangi satırların girilmediğini göremiyordu.
+ */
+function csvImportDialog({ onImported, onClose }) {
   const area = h('textarea', {
-    rows: '10', placeholder: 'AAK;15.03.2026;AL;1250,5;1,234567;0',
+    rows: '10', placeholder: 'AAL;15.03.2026;AL;1250,5;3,123456;0',
     style: 'width:100%;font-family:var(--mono);font-size:.82rem;padding:10px;'
       + 'border:1px solid var(--border);border-radius:9px;background:var(--surface);',
   });
   const result = h('div', { class: 'stack' });
 
-  const body = h('div', { class: 'stack' },
+  const iceAktar = () => {
+    const { rows, errors } = parseCSV(area.value);
+    result.replaceChildren();
+
+    if (rows.length) {
+      rows.forEach(addTransaction);
+      result.append(h('div', { class: 'notice' },
+        h('b', {}, `${rows.length} işlem eklendi.`),
+        h('div', { style: 'margin-top:4px;font-size:.82rem' },
+          rows.slice(0, 6).map((r) => `${r.code} ${r.date} ${r.type === 'SAT' ? 'satış' : 'alış'}`)
+            .join(' · ') + (rows.length > 6 ? ` · +${rows.length - 6} tane daha` : ''))));
+      toast(`${rows.length} işlem eklendi`);
+      onImported?.();
+      area.value = '';                       // aynı satırlar iki kez eklenmesin
+    }
+
+    if (errors.length) {
+      result.append(h('div', { class: 'notice warn' },
+        h('b', {}, `${errors.length} satır atlandı:`),
+        h('div', { style: 'margin-top:4px;font-size:.8rem' }, errors.slice(0, 10).join(' · ')),
+        errors.length > 10
+          ? h('div', { style: 'margin-top:4px;font-size:.8rem' }, `…ve ${errors.length - 10} tane daha`)
+          : null));
+    }
+
+    if (!rows.length && !errors.length) {
+      result.append(h('div', { class: 'notice warn' }, 'İçe aktarılacak satır bulunamadı.'));
+    }
+  };
+
+  return h('div', { class: 'stack' },
     h('p', { class: 'dim', style: 'margin:0' },
       'Her satır bir işlem: fon kodu; tarih; tür (AL/SAT); adet; birim fiyat; masraf. '
-      + 'Ayraç olarak noktalı virgül, virgül veya sekme kullanabilirsin. '
-      + 'Excel\'den kopyalayıp yapıştırabilirsin.'),
+      + 'Ayraç olarak noktalı virgül veya sekme kullan - virgül Türkçe sayılarda '
+      + 'ondalık ayracı olduğu için ayraç olarak güvenli değildir. '
+      + "Excel'den kopyalayıp doğrudan yapıştırabilirsin."),
     area,
     result,
     h('div', { class: 'btn-row', style: 'justify-content:flex-end' },
-      h('button', {
-        class: 'btn btn-primary', type: 'button',
-        onclick: () => {
-          const { rows, errors } = parseCSV(area.value);
-          result.replaceChildren();
-          if (errors.length) {
-            result.append(h('div', { class: 'notice warn' },
-              h('b', {}, `${errors.length} satır atlandı:`),
-              h('div', { style: 'margin-top:4px;font-size:.8rem' }, errors.slice(0, 8).join(' · '))));
-          }
-          if (!rows.length) {
-            result.append(h('div', { class: 'notice warn' }, 'İçe aktarılacak geçerli satır yok.'));
-            return;
-          }
-          rows.forEach(addTransaction);
-          toast(`${rows.length} işlem eklendi`);
-          onDone?.();
-        },
-      }, 'İçe Aktar')));
-
-  return body;
+      h('button', { class: 'btn', type: 'button', onclick: () => onClose?.() }, 'Kapat'),
+      h('button', { class: 'btn btn-primary', type: 'button', onclick: iceAktar }, 'İçe Aktar')));
 }
 
 export function renderAyarlar(ctx) {
@@ -198,8 +248,11 @@ export function renderAyarlar(ctx) {
       h('button', {
         class: 'btn', type: 'button',
         onclick: () => {
-          const close = openModal('Toplu İşlem İçe Aktar',
-            csvImportDialog(() => { close(); ctx.refresh(); }));
+          let close;
+          close = openModal('Toplu İşlem İçe Aktar', csvImportDialog({
+            onImported: () => ctx.refresh(),
+            onClose: () => close?.(),
+          }));
         },
       }, 'Excel/CSV\'den Ekle'),
       fileInput)));

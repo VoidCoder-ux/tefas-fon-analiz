@@ -54,16 +54,26 @@ export function buildPositions(txs) {
   return pos;
 }
 
-/** İşlemleri tarih indeksine göre gruplar. */
+/**
+ * İşlemleri tarih indeksine göre gruplar.
+ *
+ * Veri takviminden (3 yıl) daha eski işlemler ilk güne sabitlenir. Aksi hâlde
+ * seriden tamamen düşerlerdi; o zaman 3 yıldan uzun süredir elde tutulan bir
+ * fon için net yatırılan tutar sıfır görünür ve grafikler hiç çizilmezdi.
+ */
 function groupByIndex(txs) {
   const byIdx = new Map();
   for (const t of txs) {
-    const idx = indexForDate(t.date);
-    if (idx < 0) continue;                       // veri takviminden önce
+    const idx = Math.max(0, indexForDate(t.date));
     if (!byIdx.has(idx)) byIdx.set(idx, []);
     byIdx.get(idx).push(t);
   }
   return byIdx;
+}
+
+/** Veri takviminden önce girilmiş işlem var mı (arayüzde bilgilendirmek için). */
+export function hasPreRangeTx(txs) {
+  return txs.some((t) => t.date && indexForDate(t.date) < 0);
 }
 
 /**
@@ -116,6 +126,8 @@ export async function analyze(txs) {
       name: meta?.name || p.code,
       cat: meta?.cat || '—',
       alloc: meta?.alloc || {},
+      // Fonun TEFAS'ta son fiyat yayımladığı gün; kapanmış fonları ayırt etmek için.
+      lastPriceDate: meta?.date || null,
       price,
       pricePrev,
       missingPrice: !hasPrice,
@@ -179,6 +191,8 @@ export async function analyze(txs) {
     },
     series,
     xirr: xirrFromTx(txs, value, DB.calendar[last]),
+    // Veri takviminden eski işlem varsa arayüz bunu açıklar.
+    preRange: hasPreRangeTx(txs),
   };
 }
 
@@ -186,8 +200,9 @@ export async function analyze(txs) {
 function unitsAsOf(txs, idx) {
   const units = new Map();
   for (const t of txs) {
-    const at = indexForDate(t.date);
-    if (at < 0 || at > idx) continue;
+    // Takvimden eski işlemler ilk güne sabitlenir (groupByIndex ile aynı kural).
+    const at = Math.max(0, indexForDate(t.date));
+    if (at > idx) continue;
     const cur = units.get(t.code) || 0;
     units.set(t.code, t.type === 'SAT' ? Math.max(0, cur - t.units) : cur + t.units);
   }

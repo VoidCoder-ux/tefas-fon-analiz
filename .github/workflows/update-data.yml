@@ -65,6 +65,19 @@ jobs:
           restore-keys: |
             tefas-db-
 
+      # Bozuk bir JS dosyası sessizce yayına gitmesin: tarayıcı hatayı yalnızca
+      # çalışma anında gösterir, bu adım ise derlemeyi hemen durdurur.
+      - name: Kaynak kodu sözdizimi denetimi
+        run: |
+          set -e
+          mkdir -p /tmp/esm
+          for f in assets/js/*.js assets/js/views/*.js; do
+            cp "$f" "/tmp/esm/$(basename "${f%.js}").mjs"
+          done
+          for f in /tmp/esm/*.mjs; do node --check "$f"; done
+          python -c "import json,pathlib; [json.loads(pathlib.Path(p).read_text(encoding='utf-8')) for p in pathlib.Path('.').glob('*.json')]"
+          echo "$(ls /tmp/esm/*.mjs | wc -l) JS modülü ve JSON dosyaları geçerli"
+
       - name: TEFAS verisini güncelle ve siteyi üret
         env:
           TEFAS_YEARS: ${{ github.event.inputs.years || '3' }}

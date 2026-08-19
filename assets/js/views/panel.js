@@ -2,9 +2,23 @@
 
 import { h, tl, tlSigned, pct, pctSigned, units as fmtUnits, money, cls, isNum, fmtDate }
   from '../util.js';
+import { DB } from '../data.js';
 import { lineChart } from '../charts.js';
 import { sliceLastDays } from '../portfolio.js';
 import { kpiCard, plCard, sectionCard, emptyState, rangeSelector, sortableTable } from './common.js';
+
+/**
+ * Fon TEFAS'ta fiyat yayımlamayı bırakmış mı?
+ * Kapanan fonlarda son bilinen fiyat sonsuza kadar taşınır; kullanıcı donmuş
+ * bir değere baktığını bilmeli.
+ */
+const DURMUS_GUN_ESIGI = 7;
+
+function fiyatiDurmus(holding) {
+  if (!holding.lastPriceDate || !DB.meta.lastDataDate) return false;
+  const fark = (new Date(DB.meta.lastDataDate) - new Date(holding.lastPriceDate)) / 86400000;
+  return fark > DURMUS_GUN_ESIGI;
+}
 
 export function renderPanel(ctx) {
   const { analysis, navigate } = ctx;
@@ -112,7 +126,8 @@ export function renderPanel(ctx) {
           key: 'code', label: 'Fon', defaultDir: 'asc',
           render: (r) => h('div', { style: 'display:flex;flex-direction:column;gap:2px' },
             h('span', {}, h('span', { class: 'code-chip' }, r.code),
-              r.missingPrice ? h('span', { class: 'pill', style: 'margin-left:6px' }, 'fiyat yok') : null),
+              r.missingPrice ? h('span', { class: 'pill', style: 'margin-left:6px' }, 'fiyat yok') : null,
+              fiyatiDurmus(r) ? h('span', { class: 'pill down', style: 'margin-left:6px' }, 'fiyat durmuş') : null),
             h('span', { class: 'dim', style: 'font-size:.76rem;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap' }, r.name)),
         },
         { key: 'units', label: 'Adet', render: (r) => fmtUnits(r.units) },
@@ -153,6 +168,22 @@ export function renderPanel(ctx) {
           h('th', {}, 'Alım Tutarı'), h('th', {}, 'Satış Tutarı'),
           h('th', {}, 'Gerçekleşen K/Z'))),
         h('tbody', {}, rows)))));
+  }
+
+  if (analysis.preRange) {
+    root.append(h('div', { class: 'notice' },
+      `Bazı işlemlerin ${fmtDate(series.dates[0])} tarihinden eski. TEFAS'tan `
+      + 'yalnızca son 3 yılın fiyatları alındığı için grafikler bu tarihten '
+      + 'itibaren çiziliyor; maliyet ve toplam kazanç hesapların gerçek alım '
+      + 'fiyatlarınla yapılıyor, etkilenmiyor.'));
+  }
+
+  const durmus = open.filter(fiyatiDurmus);
+  if (durmus.length) {
+    root.append(h('div', { class: 'notice warn' },
+      `${durmus.map((x) => `${x.code} (son fiyat ${fmtDate(x.lastPriceDate)})`).join(', ')} `
+      + 'için TEFAS bir süredir yeni fiyat yayımlamıyor - fon kapanmış olabilir. '
+      + 'Bu pozisyonların değeri son bilinen fiyattan hesaplanıyor, yani güncel değil.'));
   }
 
   const oversold = analysis.holdings.filter((x) => x.oversold);

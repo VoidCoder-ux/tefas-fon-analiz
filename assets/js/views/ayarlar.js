@@ -7,7 +7,7 @@ import { DB } from '../data.js';
 import {
   profiles, activeProfileId, addProfile, renameProfile, removeProfile,
   settings, setSetting, exportJSON, importJSON, resetAll, addTransaction,
-  allTransactions,
+  allTransactions, daysSinceBackup,
 } from '../store.js';
 import { sectionCard } from './common.js';
 
@@ -229,8 +229,23 @@ export function renderAyarlar(ctx) {
     fileInput.value = '';
   });
 
+  const gecenGun = daysSinceBackup();
+  const islemSayisi = allTransactions().length;
+  const yedekUyarisi = islemSayisi > 0 && (gecenGun === null || gecenGun > 30)
+    ? h('div', { class: 'notice warn', style: 'margin-bottom:12px' },
+      gecenGun === null
+        ? `${islemSayisi} işlem girdin ama henüz hiç yedek almadın. Tarayıcı verilerini `
+          + 'temizlersen hepsi kaybolur.'
+        : `Son yedeğin ${gecenGun} gün önce alınmış. O tarihten sonra girdiğin işlemler `
+          + 'yedekte yok.')
+    : (gecenGun !== null
+      ? h('p', { class: 'dim', style: 'margin:0 0 10px;font-size:.84rem' },
+        gecenGun === 0 ? 'Son yedek: bugün.' : `Son yedek: ${gecenGun} gün önce.`)
+      : null);
+
   root.append(sectionCard('Yedekleme',
     'Veriler yalnızca bu tarayıcıda tutulur - düzenli yedek al',
+    yedekUyarisi,
     h('p', { class: 'dim', style: 'margin:0 0 12px;font-size:.86rem' },
       'Yedek dosyasını başka bir cihazda içe aktararak portföyünü taşıyabilirsin. '
       + 'Aile bireyleri kendi cihazlarında kendi verilerini tutar; istersen yedeği paylaşarak '

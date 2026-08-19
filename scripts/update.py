@@ -72,8 +72,23 @@ CREATE TABLE IF NOT EXISTS allocation (
     json TEXT
 );
 
+CREATE TABLE IF NOT EXISTS meta (
+    key   TEXT PRIMARY KEY,
+    value TEXT
+);
+
 CREATE INDEX IF NOT EXISTS idx_prices_code ON prices (code, date);
 """
+
+# `funds` tablosuna sonradan eklenen sütunlar (mevcut cache'ler bozulmasın diye
+# ALTER TABLE ile eklenir).
+EK_SUTUNLAR = {
+    "category": "TEXT",          # TEFAS'ın resmi şemsiye fon türü
+    "category_src": "TEXT",      # "tefas" veya "unvan" (ünvandan çıkarım)
+}
+
+# Kategori eşlemesi bu kadar günde bir yenilenir (nadiren değişir, 13 istek).
+CATEGORY_REFRESH_DAYS = 7
 
 
 # --------------------------------------------------------------------- veri çekme
@@ -83,7 +98,85 @@ def open_db(path: Path) -> sqlite3.Connection:
     conn = sqlite3.connect(path)
     conn.executescript(SCHEMA)
     conn.execute("PRAGMA journal_mode=WAL")
+    mevcut = {r[1] for r in conn.execute("PRAGMA table_info(funds)")}
+    for ad, tip in EK_SUTUNLAR.items():
+        if ad not in mevcut:
+            conn.execute(f"ALTER TABLE funds ADD COLUMN {ad} {tip}")
+    conn.commit()
     return conn
+
+
+def meta_get(conn: sqlite3.Connection, key: str) -> str | None:
+    row = conn.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
+    return row[0] if row else None
+
+
+def meta_set(conn: sqlite3.Connection, key: str, value: str) -> None:
+    conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES (?,?)", (key, value))
+    conn.commit()
+
+
+def sync_categories(conn: sqlite3.Connection, client: Tefas, end: dt.date,
+                    force: bool = False) -> int:
+    """Fonların resmi TEFAS kategorisini eşler.
+
+    Her şemsiye fon türü için bir istek atılır (12 tür + 1 tür listesi = 13
+    istek). Filtre yalnızca yatırım fonlarında (YAT) çalışıyor; emeklilik ve
+    borsa yatırım fonları ünvandan çıkarılan kategoriyi kullanmaya devam eder.
+
+    Kategoriler nadiren değiştiği için haftada bir yenilenir.
+    """
+    son = meta_get(conn, "category_sync")
+    eksik = conn.execute(
+        "SELECT COUNT(*) FROM funds WHERE kind = 'YAT' AND category IS NULL").fetchone()[0]
+    if not force and son and not eksik:
+        yas = (end - dt.date.fromisoformat(son)).days
+        if yas < CATEGORY_REFRESH_DAYS:
+            print(f"[kategori] {yas} gün önce eşlendi, atlanıyor", flush=True)
+            return 0
+
+    try:
+        turler = client.fund_types("YAT")
+    except Exception as exc:                                    # noqa: BLE001
+        print(f"[kategori] tür listesi alınamadı ({exc}) - ünvandan çıkarım sürecek", flush=True)
+        return 0
+
+    # Filtrenin gerçekten uygulandığını anlamak için filtresiz sonucu referans al:
+    # bazı fon tiplerinde TEFAS `sfonTurKod` parametresini yok sayıp tüm fonları
+    # döndürüyor. "Serbest" gibi kalabalık kategoriler meşru olarak büyük olabilir,
+    # bu yüzden sayıya değil, tüm kümeye eşitliğe bakılır.
+    try:
+        tumu = client.codes_for_type("YAT", None, end)
+    except Exception:                                           # noqa: BLE001
+        tumu = set()
+
+    eslesen: dict[str, str] = {}
+    for tur in turler:
+        kod, ad = tur.get("sfonTuru"), (tur.get("sfonTurAciklama") or "").strip()
+        if kod is None or not ad:
+            continue
+        try:
+            kodlar = client.codes_for_type("YAT", kod, end)
+        except Exception as exc:                                # noqa: BLE001
+            print(f"[kategori] {ad}: alınamadı ({exc})", flush=True)
+            continue
+        if not kodlar:
+            continue
+        if tumu and kodlar == tumu:
+            print(f"[kategori] {ad}: filtre yok sayılmış ({len(kodlar)}), atlandı", flush=True)
+            continue
+        print(f"[kategori] {ad}: {len(kodlar)} fon", flush=True)
+        for c in kodlar:
+            eslesen[c] = ad
+
+    if not eslesen:
+        return 0
+    conn.executemany(
+        "UPDATE funds SET category = ?, category_src = 'tefas' WHERE code = ?",
+        [(ad, c) for c, ad in eslesen.items()])
+    conn.commit()
+    meta_set(conn, "category_sync", end.isoformat())
+    return len(eslesen)
 
 
 def latest_stored_date(conn: sqlite3.Connection) -> str | None:
@@ -197,6 +290,83 @@ def _volatility_and_drawdown(prices: list[float]) -> tuple[float | None, float |
     return round(vol, 2), round(max_dd * 100, 2)
 
 
+# Yüzdelik sıralamanın anlamlı olması için kategoride gereken asgari fon sayısı.
+MIN_KATEGORI_FON = 5
+
+
+def add_category_percentiles(funds: list[dict]) -> None:
+    """Her fona, kendi kategorisi içindeki yüzdelik sırasını ekler.
+
+    Yüzdelik = o kategoride bu fondan daha düşük değere sahip fonların oranı.
+    Getiri için yüksek yüzdelik iyidir; oynaklık ve düşüş için yorum arayüzde
+    yapılır (yüksek yüzdelik = daha oynak / daha derin düşüş).
+    """
+    metrikler = {
+        "1y": lambda f: (f["ret"] or {}).get("1y"),
+        "3y": lambda f: (f["ret"] or {}).get("3y"),
+        "vol": lambda f: f.get("vol"),
+        "mdd": lambda f: f.get("mdd"),
+    }
+    kategoriler: dict[str, list[dict]] = {}
+    for f in funds:
+        kategoriler.setdefault(f["cat"], []).append(f)
+
+    for kategori, grup in kategoriler.items():
+        for f in grup:
+            f["catN"] = len(grup)
+        if len(grup) < MIN_KATEGORI_FON:
+            continue
+        for etiket, al in metrikler.items():
+            degerler = sorted(v for v in (al(f) for f in grup) if v is not None)
+            if len(degerler) < MIN_KATEGORI_FON:
+                continue
+            for f in grup:
+                v = al(f)
+                if v is None:
+                    continue
+                # Kaç fon bu değerin altında kaldı?
+                alt = sum(1 for d in degerler if d < v)
+                yuzdelik = alt / (len(degerler) - 1) * 100
+                f.setdefault("pct", {})[etiket] = round(yuzdelik, 1)
+                if etiket == "1y":
+                    # 1 = kategorinin en iyisi
+                    f["catRank"] = len(degerler) - alt
+                    f["catRanked"] = len(degerler)
+
+
+def money_market_index(seriler: list[tuple[int, list]], gun_sayisi: int,
+                       asgari_fon: int = 5) -> list[float | None]:
+    """Para piyasası fonlarının eşit ağırlıklı gösterge endeksi.
+
+    Mevduat benzeri, düşük riskli getirinin gerçek karşılığını verir; Sharpe
+    hesabındaki keyfî "risksiz getiri" varsayımının yerine kullanılabilir.
+    Endeks, günlük ortalama getirilerin bileşiğidir ve 100'den başlar.
+    """
+    if not seriler:
+        return [None] * gun_sayisi
+    endeks: list[float | None] = [None] * gun_sayisi
+    deger = 100.0
+    basladi = False
+    for t in range(gun_sayisi):
+        getiriler = []
+        for bas, fiyatlar in seriler:
+            i, j = t - bas, t - bas - 1
+            if j < 0 or i >= len(fiyatlar):
+                continue
+            onceki, simdi = fiyatlar[j], fiyatlar[i]
+            if isinstance(onceki, (int, float)) and isinstance(simdi, (int, float)) \
+                    and onceki > 0 and simdi > 0:
+                getiriler.append(simdi / onceki - 1)
+        if len(getiriler) >= asgari_fon:
+            if basladi:
+                deger *= 1 + sum(getiriler) / len(getiriler)
+            basladi = True
+            endeks[t] = round(deger, 6)
+        elif basladi:
+            endeks[t] = round(deger, 6)
+    return endeks
+
+
 def build_site(conn: sqlite3.Connection, out_dir: Path, years: int) -> dict:
     """dist/ altına statik siteyi ve JSON veri dosyalarını yazar."""
     data_dir = out_dir / "data"
@@ -217,12 +387,17 @@ def build_site(conn: sqlite3.Connection, out_dir: Path, years: int) -> dict:
     allocations = {code: json.loads(payload) for code, payload in
                    conn.execute("SELECT code, json FROM allocation")}
 
-    meta = {code: dict(zip(("name", "kind", "shares", "investors", "size"), rest))
+    meta = {code: dict(zip(("name", "kind", "shares", "investors", "size",
+                            "category", "category_src"), rest))
             for code, *rest in conn.execute(
-                "SELECT code, name, kind, shares, investors, size FROM funds")}
+                "SELECT code, name, kind, shares, investors, size, category, category_src "
+                "FROM funds")}
 
     funds_out: list[dict] = []
     written = 0
+    # Para piyasası fonlarının günlük fiyatları; eşit ağırlıklı bir "mevduat
+    # benzeri" gösterge endeksi üretmek için toplanır.
+    para_piyasasi: list[tuple[int, list]] = []
 
     for code in sorted(meta):
         rows = conn.execute(
@@ -261,11 +436,18 @@ def build_site(conn: sqlite3.Connection, out_dir: Path, years: int) -> dict:
         recent = [p for d, p in rows if d >= cutoff]
         vol, max_dd = _volatility_and_drawdown(recent)
 
+        # Resmi TEFAS kategorisi varsa o kullanılır; yoksa ünvandan çıkarılır.
+        resmi = (info.get("category") or "").replace(" Şemsiye Fonu", "").strip()
+        kategori = resmi or categorize(info["name"])
+        if kategori == "Para Piyasası":
+            para_piyasasi.append((first_idx, series))
+
         funds_out.append({
             "code": code,
             "name": info["name"],
             "kind": info["kind"],
-            "cat": categorize(info["name"]),
+            "cat": kategori,
+            "catSrc": "tefas" if resmi else "unvan",
             "price": round(last_price, 6),
             "date": dates[-1],
             "chg": _pct(last_price, prev_price),
@@ -279,6 +461,11 @@ def build_site(conn: sqlite3.Connection, out_dir: Path, years: int) -> dict:
             "n": span,
         })
 
+    add_category_percentiles(funds_out)
+    resmi_sayi = sum(1 for f in funds_out if f.get("catSrc") == "tefas")
+    print(f"[site] kategori: {resmi_sayi} fon TEFAS'ın resmi türünden, "
+          f"{len(funds_out) - resmi_sayi} fon ünvandan çıkarıldı", flush=True)
+
     (data_dir / "funds.json").write_text(
         json.dumps(funds_out, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
     (data_dir / "calendar.json").write_text(
@@ -288,6 +475,19 @@ def build_site(conn: sqlite3.Connection, out_dir: Path, years: int) -> dict:
     print("[site] kıyaslama serileri", flush=True)
     start_date = dt.date.fromisoformat(calendar[0])
     bench = benchmarks.collect(start_date, dt.date.fromisoformat(last_day), calendar)
+
+    # Para piyasası gösterge endeksi kendi verimizden üretilir; dış kaynağa
+    # ihtiyaç duymaz ve "mevduatta tutsaydım" karşılaştırmasının temelidir.
+    pp = money_market_index(para_piyasasi, len(calendar))
+    if any(v is not None for v in pp):
+        bench["PARAPIYASASI"] = {
+            "label": "Para Piyasası Fonları",
+            "unit": "endeks",
+            "values": pp,
+            "note": f"{len(para_piyasasi)} para piyasası fonunun eşit ağırlıklı ortalaması",
+        }
+        print(f"[site] para piyasası endeksi: {len(para_piyasasi)} fondan üretildi", flush=True)
+
     (data_dir / "benchmarks.json").write_text(
         json.dumps(bench, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
 
@@ -364,6 +564,10 @@ def main() -> int:
             print(f"{extra} eski kayıt eklendi", flush=True)
         codes = fetch_allocation(conn, client, kinds, today)
         print(f"{codes} fonun varlık dağılımı güncellendi", flush=True)
+
+        eslesen = sync_categories(conn, client, today, force=args.full)
+        if eslesen:
+            print(f"{eslesen} fonun resmi TEFAS kategorisi eşlendi", flush=True)
         removed = prune(conn, cutoff)
         if removed > 0:
             print(f"{removed} eski kayıt temizlendi", flush=True)

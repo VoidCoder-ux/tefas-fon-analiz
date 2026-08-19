@@ -1,6 +1,8 @@
 /* Kıyaslama: portföyün getirisini BIST 100, gram altın, dolar ve enflasyonla karşılaştırır. */
 
-import { h, pctSigned, num, cls, isNum, colorAt } from '../util.js';
+import { h, tl, tlSigned, pctSigned, num, cls, isNum, colorAt } from '../util.js';
+import { counterfactual } from '../insights.js';
+import { transactions } from '../store.js';
 import { DB } from '../data.js';
 import { lineChart } from '../charts.js';
 import { sliceLastDays } from '../portfolio.js';
@@ -11,6 +13,7 @@ const BENCH_COLORS = {
   GRAMALTIN: 'var(--c9)',
   USDTRY: 'var(--c2)',
   TUFE: 'var(--c5)',
+  PARAPIYASASI: 'var(--c6)',
 };
 
 /** Seriyi ilk geçerli değerine göre 100'e normalize eder. */
@@ -138,6 +141,55 @@ export function renderKiyaslama(ctx) {
 
   root.append(sectionCard('Dönemsel Getiriler',
     'Portföy satırı zaman ağırlıklıdır (para giriş/çıkışından arındırılmış)', table));
+
+  /* --------------------------------------------------- karşı-olgusal senaryo */
+
+  const txs = transactions();
+  const senaryolar = [];
+  for (const key of available) {
+    const seri = DB.benchmarks[key]?.values || [];
+    const sonuc = counterfactual(txs, seri);
+    if (sonuc) senaryolar.push({ key, label: DB.benchmarks[key].label, ...sonuc });
+  }
+
+  if (senaryolar.length && analysis.totals.value > 0) {
+    const gercek = {
+      label: 'Portföyüm (gerçek)',
+      value: analysis.totals.value,
+      invested: analysis.totals.netInvested,
+      gain: analysis.totals.totalPL,
+      gainPct: analysis.totals.totalPct,
+    };
+    const satirlar = [gercek, ...senaryolar.sort((a, b) => b.value - a.value)];
+    const enIyi = Math.max(...satirlar.map((x) => x.value));
+
+    root.append(sectionCard('Aynı Parayı Başka Yere Koysaydım',
+      'Senin gerçek yatırım tarihlerin ve tutarlarınla',
+      h('p', { class: 'dim', style: 'margin:0 0 12px;font-size:.85rem' },
+        'Her satır, tam olarak senin yaptığın tarihlerde ve tutarlarda o varlığı '
+        + 'almış olsaydın bugün elinde ne olacağını gösterir. Nakit akışları aynı '
+        + 'olduğu için doğrudan karşılaştırılabilir.'),
+      h('div', { class: 'table-wrap' }, h('table', {},
+        h('thead', {}, h('tr', {},
+          h('th', { style: 'text-align:left' }, 'Senaryo'),
+          h('th', {}, 'Bugünkü değer'), h('th', {}, 'Kazanç'), h('th', {}, 'Getiri'),
+          h('th', {}, 'Fark'))),
+        h('tbody', {}, satirlar.map((x, i) => h('tr', {
+          style: i === 0 ? 'font-weight:650;background:var(--accent-soft)' : null,
+        },
+        h('td', {},
+          h('span', {
+            class: 'swatch',
+            style: 'width:9px;height:9px;border-radius:3px;display:inline-block;margin-right:7px;'
+              + `background:${i === 0 ? 'var(--accent)' : (BENCH_COLORS[x.key] || 'var(--text-dim)')}`,
+          }),
+          x.label),
+        h('td', {}, tl(x.value)),
+        h('td', { class: cls(x.gain) }, tlSigned(x.gain)),
+        h('td', { class: cls(x.gainPct) }, pctSigned(x.gainPct, 1)),
+        h('td', { class: cls(x.value - enIyi) },
+          x.value === enIyi ? '—' : tlSigned(x.value - enIyi)))))))));
+  }
 
   /* ----------------------------------------------------------------- açıklama */
 

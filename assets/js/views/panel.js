@@ -3,8 +3,10 @@
 import { h, tl, tlSigned, pct, pctSigned, units as fmtUnits, money, cls, isNum, fmtDate }
   from '../util.js';
 import { DB } from '../data.js';
-import { lineChart } from '../charts.js';
+import { lineChart, barChart } from '../charts.js';
 import { sliceLastDays } from '../portfolio.js';
+import { timingQuality, cashflowCalendar, consistencyChecks } from '../insights.js';
+import { transactions, daysSinceBackup } from '../store.js';
 import { kpiCard, plCard, sectionCard, emptyState, rangeSelector, sortableTable } from './common.js';
 
 /**
@@ -79,6 +81,41 @@ export function renderPanel(ctx) {
           : null),
     })));
 
+  /* -------------------------------------------------- işlem tutarlılık denetimi */
+
+  const txs = transactions();
+  const uyarilar = consistencyChecks(txs);
+  if (uyarilar.length) {
+    const gruplar = {
+      fiyat: 'Girilen fiyat TEFAS fiyatından farklı',
+      mukerrer: 'Aynı işlem iki kez girilmiş olabilir',
+      erken: 'Fonun o tarihte fiyatı yok',
+    };
+    root.append(h('div', { class: 'notice warn' },
+      h('b', {}, `${uyarilar.length} işlem kaydı gözden geçirilmeli`),
+      h('div', { style: 'margin-top:6px;display:grid;gap:3px;font-size:.84rem' },
+        uyarilar.slice(0, 6).map((u) => h('div', {}, u.message)),
+        uyarilar.length > 6
+          ? h('div', { class: 'dim' }, `…ve ${uyarilar.length - 6} kayıt daha`)
+          : null),
+      h('div', { style: 'margin-top:8px' },
+        h('button', {
+          class: 'btn btn-sm', type: 'button', onclick: () => navigate('islemler'),
+        }, 'İşlemleri aç')),
+      h('div', { class: 'dim', style: 'margin-top:6px;font-size:.78rem' },
+        Object.values(gruplar).join(' · '))));
+  }
+
+  if (txs.length >= 5 && daysSinceBackup() === null) {
+    root.append(h('div', { class: 'notice' },
+      `${txs.length} işlem girdin ama henüz yedek almadın. Veriler yalnızca bu `
+      + 'tarayıcıda duruyor; tarayıcı verilerini temizlersen kaybolur. ',
+      h('button', {
+        class: 'btn btn-sm', type: 'button', style: 'margin-left:6px',
+        onclick: () => navigate('ayarlar'),
+      }, "Ayarlar'dan yedek al")));
+  }
+
   /* ------------------------------------------------------ portföy değeri grafiği */
 
   let rangeKey = '6a';
@@ -151,6 +188,65 @@ export function renderPanel(ctx) {
 
     root.append(sectionCard('Pozisyonlar', `${open.length} açık fon · satır tıklanabilir`,
       table.element));
+  }
+
+  /* ---------------------------------------------------------- zamanlama kalitesi */
+
+  const zamanlama = timingQuality(txs);
+  if (zamanlama.length) {
+    const agirlik = zamanlama.reduce((s2, z) => s2 + z.invested, 0);
+    const ortalama = agirlik > 0
+      ? zamanlama.reduce((s2, z) => s2 + z.diffPct * z.invested, 0) / agirlik : null;
+
+    root.append(sectionCard('Zamanlama Kalitesi',
+      'Alım fiyatların, o fonu tuttuğun dönemin ortalama fiyatına göre',
+      h('p', { class: 'dim', style: 'margin:0 0 12px;font-size:.85rem' },
+        isNum(ortalama)
+          ? (ortalama < 0
+            ? `Ağırlıklı ortalamada, tuttuğun dönemin ortalama fiyatının ${pct(Math.abs(ortalama), 1)} `
+              + 'altından almışsın.'
+            : `Ağırlıklı ortalamada, tuttuğun dönemin ortalama fiyatının ${pct(ortalama, 1)} `
+              + 'üstünden almışsın.')
+          : ''),
+      h('div', { class: 'table-wrap' }, h('table', {},
+        h('thead', {}, h('tr', {},
+          h('th', { style: 'text-align:left' }, 'Fon'),
+          h('th', {}, 'Ort. alım fiyatın'),
+          h('th', {}, 'Dönemin ort. fiyatı'),
+          h('th', {}, 'Fark'),
+          h('th', {}, 'Yatırdığın'))),
+        h('tbody', {}, zamanlama.map((z) => h('tr', {},
+          h('td', {}, h('span', { class: 'code-chip' }, z.code)),
+          h('td', {}, money(z.avgCost)),
+          h('td', {}, money(z.avgMarket)),
+          h('td', { class: z.diffPct < 0 ? 'up' : 'down' }, pctSigned(z.diffPct, 1)),
+          h('td', {}, tl(z.invested)))))))));
+  }
+
+  /* --------------------------------------------------------------- nakit akışı */
+
+  const nakit = cashflowCalendar(txs);
+  if (nakit.monthly.length > 1) {
+    const kutu = h('div');
+    const sonAylar = nakit.monthly.slice(-18);
+    root.append(sectionCard('Aylık Yatırım Akışı',
+      `Son ${sonAylar.length} ay · pozitif = para koydun, negatif = çektin`, kutu));
+    barChart(kutu, {
+      items: sonAylar.map((m) => ({ label: m.month.slice(2), value: m.amount })),
+      format: (v) => tlSigned(v),
+      labelWidth: 52,
+    });
+  }
+
+  if (nakit.realizedByYear.length) {
+    root.append(sectionCard('Yıllara Göre Gerçekleşen Kâr/Zarar',
+      'Yalnızca satılan pozisyonlardan; açık pozisyonlar dahil değil',
+      h('div', { class: 'table-wrap' }, h('table', {},
+        h('thead', {}, h('tr', {},
+          h('th', { style: 'text-align:left' }, 'Yıl'), h('th', {}, 'Gerçekleşen K/Z'))),
+        h('tbody', {}, nakit.realizedByYear.map((y) => h('tr', {},
+          h('td', {}, String(y.year)),
+          h('td', { class: cls(y.amount) }, tlSigned(y.amount)))))))));
   }
 
   if (closed.length) {

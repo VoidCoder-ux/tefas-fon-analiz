@@ -1,8 +1,12 @@
 /* Dağılım: portföyün fon, kategori ve gerçek varlık sınıfı kırılımları. */
 
-import { h, tl, tlSigned, pct, colorAt, isNum } from '../util.js';
-import { donutWithLegend, barChart } from '../charts.js';
+import { h, tl, tlSigned, pct, pctSigned, colorAt, isNum, num } from '../util.js';
+import { donutWithLegend, barChart, stackedAreaChart } from '../charts.js';
+import { weightHistory, attribution } from '../insights.js';
+import { transactions } from '../store.js';
 import { sectionCard, emptyState } from './common.js';
+
+const cls2 = (v) => (!isNum(v) || v === 0 ? '' : v > 0 ? 'up' : 'down');
 
 export function renderDagilim(ctx) {
   const { analysis, navigate } = ctx;
@@ -77,15 +81,29 @@ export function renderDagilim(ctx) {
 
   /* -------------------------------------------------------------- kâr/zarar katkısı */
 
-  const contributions = analysis.holdings
-    .filter((x) => isNum(x.totalPL) && Math.abs(x.totalPL) > 0.005)
-    .sort((a, b) => b.totalPL - a.totalPL)
-    .map((x) => ({ label: x.code, value: x.totalPL }));
-
-  if (contributions.length) {
+  const katkilar = attribution(analysis.holdings, totals.netInvested);
+  if (katkilar.length) {
     const box = h('div');
-    root.append(sectionCard('Kâr/Zarar Katkısı', 'Fon başına toplam kazanç (gerçekleşen dahil)', box));
-    barChart(box, { items: contributions, format: (v) => tlSigned(v) });
+    const toplamPuan = katkilar.reduce((s2, k) => s2 + k.points, 0);
+    root.append(sectionCard('Kâr/Zarar Katkısı',
+      `Toplam getirinin ${pctSigned(toplamPuan, 1)} puanı bu dağılımdan geliyor`,
+      h('p', { class: 'dim', style: 'margin:0 0 12px;font-size:.85rem' },
+        'Her fonun toplam getirine kaç puan kattığını gösterir: fonun kâr/zararı, '
+        + "yatırdığın net anaparaya bölünür. Puanların toplamı, Panel'deki toplam "
+        + 'getiri yüzdesine eşittir.'),
+      box,
+      h('div', { class: 'table-wrap', style: 'margin-top:12px' }, h('table', {},
+        h('thead', {}, h('tr', {},
+          h('th', { style: 'text-align:left' }, 'Fon'),
+          h('th', {}, 'Kâr/Zarar'), h('th', {}, 'Getiriye katkısı'))),
+        h('tbody', {}, katkilar.map((k) => h('tr', {},
+          h('td', {}, h('span', { class: 'code-chip' }, k.code)),
+          h('td', { class: cls2(k.amount) }, tlSigned(k.amount)),
+          h('td', { class: cls2(k.points) }, `${pctSigned(k.points, 2)} puan`))))))));
+    barChart(box, {
+      items: katkilar.map((k) => ({ label: k.code, value: k.points })),
+      format: (v) => `${pctSigned(v, 2)} puan`,
+    });
   }
 
   const daily = open
@@ -97,6 +115,23 @@ export function renderDagilim(ctx) {
     const box = h('div');
     root.append(sectionCard('Bugünkü Katkı', `Toplam ${tlSigned(totals.dayPL)}`, box));
     barChart(box, { items: daily, format: (v) => tlSigned(v) });
+  }
+
+  /* ------------------------------------------------------------ ağırlık kayması */
+
+  const seri = analysis.series;
+  if (seri.dates.length > 20) {
+    const agirlik = weightHistory(transactions(), seri.start, seri.dates);
+    if (agirlik.codes.length > 1) {
+      const kutu = h('div');
+      root.append(sectionCard('Ağırlık Kayması',
+        'Portföyünün bileşimi zaman içinde nasıl değişti',
+        h('p', { class: 'dim', style: 'margin:0 0 12px;font-size:.85rem' },
+          'Alım yapmasan bile kazandıran fon portföyde büyür. Bu grafik, hangi fonun '
+          + 'payının farkında olmadan arttığını gösterir.'),
+        kutu));
+      stackedAreaChart(kutu, { rows: agirlik.rows, codes: agirlik.codes });
+    }
   }
 
   /* ------------------------------------------------------------- yoğunlaşma uyarısı */

@@ -1,9 +1,12 @@
-/* Risk: oynaklık, Sharpe, maksimum düşüş ve fonlar arası korelasyon. */
+/* Risk: oynaklık, Sharpe, düşüşler, tutarlılık ve çeşitlendirme. */
 
-import { h, pct, pctSigned, num, cls, isNum } from '../util.js';
+import { h, pct, pctSigned, num, cls, isNum, fmtDate } from '../util.js';
 import { DB, cachedHistory, priceAtIndex, lastIndex } from '../data.js';
-import { lineChart, correlationTable } from '../charts.js';
+import { lineChart, correlationTable, monthlyReturnTable } from '../charts.js';
 import { riskSummary, dailyReturns, correlation } from '../portfolio.js';
+import {
+  monthlyReturns, yearlyFromMonthly, drawdownEpisodes, rollingReturns, diversification,
+} from '../insights.js';
 import { settings, setSetting } from '../store.js';
 import { kpiCard, sectionCard, emptyState } from './common.js';
 
@@ -71,7 +74,17 @@ export function renderRisk(ctx) {
         : null,
     })));
 
-  /* --------------------------------------------------------- risksiz getiri ayarı */
+  /* ---------------------------------------------------------- risksiz getiri ayarı */
+
+  const ppSerisi = DB.benchmarks?.PARAPIYASASI?.values;
+  let ppYillik = null;
+  if (ppSerisi?.length) {
+    const dilim = ppSerisi.slice(series.start, series.start + series.dates.length)
+      .filter((v) => isNum(v) && v > 0);
+    if (dilim.length > 30 && summary.days > 0) {
+      ppYillik = ((dilim[dilim.length - 1] / dilim[0]) ** (365.25 / summary.days) - 1) * 100;
+    }
+  }
 
   const rfInput = h('input', {
     type: 'number', value: String(riskFree), min: '0', max: '200', step: '1',
@@ -87,8 +100,18 @@ export function renderRisk(ctx) {
       h('label', { class: 'dim', style: 'font-size:.86rem' },
         'Sharpe hesabında kullanılacak risksiz yıllık getiri (%):'),
       rfInput,
-      h('span', { class: 'dim', style: 'font-size:.78rem' },
-        'Genelde mevduat veya para piyasası fonu getirisi kullanılır.'))));
+      isNum(ppYillik)
+        ? h('button', {
+          class: 'btn btn-sm', type: 'button',
+          onclick: () => { setSetting('riskFree', Math.round(ppYillik)); ctx.refresh(); },
+        }, `Para piyasası fonlarını kullan (%${num(ppYillik, 0)})`)
+        : null),
+    isNum(ppYillik)
+      ? h('p', { class: 'dim', style: 'margin:8px 0 0;font-size:.8rem' },
+        `Aynı dönemde ${DB.benchmarks.PARAPIYASASI.label.toLowerCase()} `
+        + `%${num(ppYillik, 1)} yıllık getirmiş. Bu, mevduat benzeri düşük riskli `
+        + 'getirinin gerçek karşılığıdır; varsayım yerine bunu kullanabilirsin.')
+      : null));
 
   /* ----------------------------------------------------------------- düşüş grafiği */
 
@@ -101,12 +124,97 @@ export function renderRisk(ctx) {
     baseline: 0,
     yFormat: (v) => pct(v, 0),
     valueFormat: (v) => pct(v, 2),
-    series: [{
-      name: 'Düşüş', values: drawdownSeries(series.twr),
-      color: 'var(--down)', fill: true,
-    }],
+    series: [{ name: 'Düşüş', values: drawdownSeries(series.twr), color: 'var(--down)', fill: true }],
     legend: false,
   });
+
+  /* -------------------------------------------------------------- düşüş dökümü */
+
+  const donemler = drawdownEpisodes(series.dates, series.twr, 5);
+  if (donemler.length) {
+    root.append(sectionCard('Düşüş Dökümü',
+      'En derin geri çekilmeler ve toparlanma süreleri',
+      h('p', { class: 'dim', style: 'margin:0 0 12px;font-size:.85rem' },
+        'Bir düşüşün ne kadar derin olduğu kadar, kaç ay boyunca zararda '
+        + 'kaldığın da önemlidir. "Toparlanma" sütunu, portföyün eski zirvesine '
+        + 'dönmesinin ne kadar sürdüğünü gösterir.'),
+      h('div', { class: 'table-wrap' }, h('table', {},
+        h('thead', {}, h('tr', {},
+          h('th', { style: 'text-align:left' }, 'Zirve'),
+          h('th', { style: 'text-align:left' }, 'Dip'),
+          h('th', {}, 'Derinlik'),
+          h('th', {}, 'Düşüş süresi'),
+          h('th', { style: 'text-align:left' }, 'Toparlanma'))),
+        h('tbody', {}, donemler.map((d) => h('tr', {},
+          h('td', {}, fmtDate(d.peakDate)),
+          h('td', {}, fmtDate(d.troughDate)),
+          h('td', { class: 'down' }, pct(d.depth, 1)),
+          h('td', {}, `${Math.abs(d.durationDays)} gün`),
+          h('td', {}, d.recovered
+            ? `${d.recoveryDays} günde toparladı`
+            : h('span', { class: 'pill down' }, `${d.recoveryDays} gündür sürüyor`)))))))));
+  }
+
+  /* ------------------------------------------------------- aylık getiri tablosu */
+
+  const aylik = monthlyReturns(series.dates, series.twr);
+  if (aylik.length >= 2) {
+    root.append(sectionCard('Aylık Getiriler',
+      'Zaman ağırlıklı (TWR) · yeşil kazanç, kırmızı kayıp',
+      monthlyReturnTable(aylik, yearlyFromMonthly(aylik))));
+  }
+
+  /* ------------------------------------------------------- yuvarlanan getiriler */
+
+  const pencereler = [
+    { gun: 90, ad: '3 aylık' },
+    { gun: 365, ad: '1 yıllık' },
+  ].map((p) => ({ ...p, sonuc: rollingReturns(series.dates, series.twr, p.gun) }))
+    .filter((p) => p.sonuc);
+
+  if (pencereler.length) {
+    root.append(sectionCard('Yuvarlanan Getiriler',
+      'Geçmişteki tüm dönemler üzerinden - tek bir şanslı dönemi tutarlılıktan ayırır',
+      h('div', { class: 'table-wrap' }, h('table', {},
+        h('thead', {}, h('tr', {},
+          h('th', { style: 'text-align:left' }, 'Pencere'),
+          h('th', {}, 'En kötü'), h('th', {}, 'Ortanca'), h('th', {}, 'En iyi'),
+          h('th', {}, 'Kazançlı oran'), h('th', {}, 'Dönem sayısı'))),
+        h('tbody', {}, pencereler.map((p) => h('tr', {},
+          h('td', {}, p.ad),
+          h('td', { class: cls(p.sonuc.worst) }, pctSigned(p.sonuc.worst, 1)),
+          h('td', { class: cls(p.sonuc.median) }, pctSigned(p.sonuc.median, 1)),
+          h('td', { class: cls(p.sonuc.best) }, pctSigned(p.sonuc.best, 1)),
+          h('td', {}, pct(p.sonuc.positiveShare, 0)),
+          h('td', { class: 'dim' }, String(p.sonuc.count)))))))));
+  }
+
+  /* --------------------------------------------------------------- çeşitlendirme */
+
+  const cesit = diversification(open);
+  if (cesit && open.length > 1) {
+    root.append(sectionCard('Çeşitlendirme',
+      'Kaç bağımsız bahis tuttuğun',
+      h('div', { class: 'grid grid-3' },
+        kpiCard({
+          label: 'Etkin Bahis Sayısı',
+          value: isNum(cesit.effN) ? num(cesit.effN, 1) : '—',
+          sub: `${open.length} fon tutuyorsun`,
+          hint: 'Fonlar birlikte hareket ettikçe bu sayı fon sayısının altına düşer',
+        }),
+        kpiCard({
+          label: 'Ağırlık Dengesi',
+          value: num(cesit.hhi, 1),
+          sub: 'Korelasyonu yok sayarsak kaç eşit fona denk',
+          hint: 'Fon sayısına yakınsa ağırlıklar dengeli demektir',
+        })),
+      h('p', { class: 'dim', style: 'margin:12px 0 0;font-size:.85rem' },
+        isNum(cesit.effN) && cesit.effN < open.length * 0.6
+          ? `${open.length} farklı fonun var ama birlikte hareket ettikleri için `
+            + `yaklaşık ${num(cesit.effN, 1)} bağımsız bahis gibi davranıyorlar. `
+            + 'Çeşitlendirme beklediğin kadar koruma sağlamıyor olabilir.'
+          : 'Fonların büyük ölçüde birbirinden bağımsız hareket ediyor.')));
+  }
 
   /* --------------------------------------------------------------- korelasyon */
 
@@ -120,16 +228,12 @@ export function renderRisk(ctx) {
       for (let i = start; i <= end; i++) prices.push(priceAtIndex(hist, i));
       return dailyReturns(prices);
     });
-
     const matrix = codes.map((_, i) => codes.map((__, j) => (
       i === j ? 1 : correlation(returnsByCode[i], returnsByCode[j])
     )));
 
     root.append(sectionCard('Fonlar Arası Korelasyon',
       'Son 1 yıl · 1\'e yakın = birlikte hareket eder, 0\'a yakın = bağımsız',
-      h('p', { class: 'dim', style: 'margin:0 0 12px;font-size:.85rem' },
-        'Yeşil hücreler birlikte hareket eden fonları gösterir. Portföyün büyük kısmı '
-        + 'yüksek korelasyonluysa çeşitlendirme beklediğin kadar koruma sağlamıyor olabilir.'),
       correlationTable(codes, matrix)));
   }
 

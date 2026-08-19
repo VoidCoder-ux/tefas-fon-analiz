@@ -1,5 +1,10 @@
 """Fon ünvanından kategori çıkarımı.
 
+Kategori adları TEFAS'ın resmi şemsiye fon türleriyle birebir aynı yazılır
+("Kıymetli Madenler" gibi); aksi hâlde aynı tür iki ayrı kategori olarak
+görünür. Bu yol yalnızca resmi kategori alınamayan fonlar (emeklilik ve borsa
+yatırım fonları) için kullanılır.
+
 TEFAS'ın yeni fiyat ucu fon türü alanını döndürmüyor; ünvan ise türü
 neredeyse her zaman içinde taşıyor (SPK ünvan kuralları gereği).
 Aşağıdaki kurallar sırayla denenir, ilk eşleşen kategori kullanılır.
@@ -11,7 +16,7 @@ import re
 # (kategori, ünvanda aranacak kalıp) - sıra önemli, özelden genele.
 RULES: list[tuple[str, str]] = [
     ("Para Piyasası", r"PARA P[İI]YASASI"),
-    ("Kıymetli Maden", r"ALTIN|KIYMETL[İI] MADEN|GÜMÜ[ŞS]"),
+    ("Kıymetli Madenler", r"ALTIN|KIYMETL[İI] MADEN|GÜMÜ[ŞS]"),
     ("Hisse Senedi", r"H[İI]SSE SENED[İI]"),
     ("Endeks", r"ENDEKS"),
     ("Serbest", r"SERBEST"),

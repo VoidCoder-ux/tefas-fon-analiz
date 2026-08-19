@@ -19,6 +19,8 @@ import urllib.request
 
 INFO_URL = "https://www.tefas.gov.tr/api/funds/fonGnlBlgSiraliGetir"
 DIST_URL = "https://www.tefas.gov.tr/api/funds/dagilimSiraliGetirT"
+# Resmi semsiye fon turleri (kategori eslemesi icin).
+TYPES_URL = "https://www.tefas.gov.tr/api/funds/fonTurGetir"
 
 # Tek istekte istenecek azami gun sayisi (API ~30 gun sinirli, 28 guvenli esik).
 MAX_DAYS_PER_REQUEST = 28
@@ -203,6 +205,22 @@ class Tefas:
                     "investors": row.get("kisiSayisi"),
                     "size": row.get("portfoyBuyukluk"),
                 }
+
+    def fund_types(self, kind: str = "YAT") -> list[dict]:
+        """TEFAS'in resmi semsiye fon turleri: [{sfonTuru, sfonTurAciklama}, ...]."""
+        return self._request(TYPES_URL, {"dil": "TR", "fonTipi": kind})
+
+    def codes_for_type(self, kind: str, type_code: int | None, end: dt.date) -> set[str]:
+        """Belirli bir semsiye fon turundeki fon kodlari.
+
+        Kategori esleme icin kullanilir; kisa bir tarih penceresi yeterlidir.
+        Not: Filtre yalnizca YAT tipinde calisiyor, EMK/BYF'de yok sayiliyor.
+        """
+        start = end - dt.timedelta(days=5)
+        body = self._body(kind, start, end)
+        body["sfonTurKod"] = type_code
+        rows = self._request(INFO_URL, body)
+        return {r["fonKodu"].strip().upper() for r in rows if r.get("fonKodu")}
 
     def allocation(self, kind: str, start: dt.date, end: dt.date):
         """Fonlarin varlik dagilimi kayitlarini uretir (yuzde alanlari)."""

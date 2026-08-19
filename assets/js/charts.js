@@ -382,4 +382,223 @@ export function correlationTable(labels, matrix) {
   return h('div', { class: 'table-wrap' }, h('table', {}, h('thead', {}, head), h('tbody', {}, rows)));
 }
 
+/* ------------------------------------------------------- aylık getiri tablosu */
+
+const AY_KISA = ['Oca', 'Şub', 'Mar', 'Nis', 'May', 'Haz',
+  'Tem', 'Ağu', 'Eyl', 'Eki', 'Kas', 'Ara'];
+
+/**
+ * Yıl × ay getiri tablosu; hücreler kazanç/kayba göre renklenir.
+ * @param {{year:number, month:number, ret:number}[]} aylik
+ */
+export function monthlyReturnTable(aylik, yillik = []) {
+  const enBuyuk = Math.max(...aylik.map((a) => Math.abs(a.ret)), 1);
+  const renk = (v) => {
+    if (!isNum(v)) return 'transparent';
+    const yogunluk = Math.min(Math.abs(v) / enBuyuk, 1) * 0.7;
+    return v >= 0
+      ? `color-mix(in srgb, var(--up) ${yogunluk * 100}%, transparent)`
+      : `color-mix(in srgb, var(--down) ${yogunluk * 100}%, transparent)`;
+  };
+
+  const veri = new Map();
+  for (const a of aylik) veri.set(`${a.year}-${a.month}`, a.ret);
+  const yillar = [...new Set(aylik.map((a) => a.year))].sort((a, b) => b - a);
+  const yilToplam = new Map(yillik.map((y) => [y.year, y.ret]));
+
+  const bicim = (v) => (isNum(v)
+    ? `${v < 0 ? '-' : ''}%${Math.abs(v).toFixed(1).replace('.', ',')}` : '');
+
+  return h('div', { class: 'table-wrap' }, h('table', {},
+    h('thead', {}, h('tr', {},
+      h('th', { style: 'text-align:left' }, 'Yıl'),
+      AY_KISA.map((a) => h('th', { style: 'text-align:center' }, a)),
+      h('th', { style: 'text-align:center' }, 'Yıl'))),
+    h('tbody', {}, yillar.map((yil) => h('tr', {},
+      h('td', { style: 'font-weight:600' }, String(yil)),
+      AY_KISA.map((_, i) => {
+        const v = veri.get(`${yil}-${i + 1}`);
+        return h('td', {
+          class: 'heat-cell',
+          style: `background:${renk(v)};text-align:center`,
+          title: isNum(v) ? `${AY_KISA[i]} ${yil}: ${bicim(v)}` : null,
+        }, bicim(v) || '·');
+      }),
+      h('td', {
+        class: 'heat-cell',
+        style: `background:${renk(yilToplam.get(yil))};text-align:center;font-weight:650`,
+      }, bicim(yilToplam.get(yil)) || '·'))))));
+}
+
+/* ------------------------------------------------------ yığılmış alan grafiği */
+
+/**
+ * Zaman içinde yüzde dağılımı (ağırlık kayması).
+ * @param {object} cfg dates:string[], codes:string[], rows:[{date, shares:{}}]
+ */
+export function stackedAreaChart(container, cfg) {
+  const draw = () => renderStacked(container, cfg);
+  container.classList.add('chart');
+  draw();
+  onResize(container, draw);
+  return draw;
+}
+
+function renderStacked(container, cfg) {
+  const { rows = [], codes = [], height = 240 } = cfg;
+  container.replaceChildren();
+  if (!rows.length || !codes.length) {
+    container.append(h('p', { class: 'dim', style: 'padding:24px 0;text-align:center' },
+      'Grafik için yeterli veri yok.'));
+    return;
+  }
+  const width = Math.max(container.clientWidth || 640, 260);
+  const pad = { top: 8, right: 8, bottom: 24, left: 38 };
+  const plotW = width - pad.left - pad.right;
+  const plotH = height - pad.top - pad.bottom;
+  const n = rows.length;
+  const x = (i) => pad.left + (n === 1 ? plotW / 2 : (i / (n - 1)) * plotW);
+  const y = (pct) => pad.top + plotH - (pct / 100) * plotH;
+
+  const svg = svgEl('svg', { viewBox: `0 0 ${width} ${height}`, width: '100%', height });
+
+  for (const tick of [0, 25, 50, 75, 100]) {
+    svg.append(svgEl('line', {
+      x1: pad.left, x2: width - pad.right, y1: y(tick), y2: y(tick),
+      stroke: 'var(--border)', 'stroke-width': 1,
+    }));
+    const t = svgEl('text', { x: pad.left - 6, y: y(tick) + 4, 'text-anchor': 'end',
+      fill: 'var(--text-dim)', 'font-size': 10 });
+    t.textContent = `%${tick}`;
+    svg.append(t);
+  }
+
+  // Her seri, altındakilerin üstüne yığılır.
+  const taban = new Array(n).fill(0);
+  codes.forEach((kod, k) => {
+    const ust = rows.map((r, i) => taban[i] + (r.shares[kod] || 0));
+    let d = `M${x(0)} ${y(taban[0])}`;
+    for (let i = 1; i < n; i++) d += `L${x(i)} ${y(taban[i])}`;
+    for (let i = n - 1; i >= 0; i--) d += `L${x(i)} ${y(ust[i])}`;
+    d += 'Z';
+    const path = svgEl('path', { d, fill: colorAt(k), opacity: .85 });
+    const title = svgEl('title');
+    title.textContent = kod;
+    path.append(title);
+    svg.append(path);
+    for (let i = 0; i < n; i++) taban[i] = ust[i];
+  });
+
+  const etiketSayisi = Math.max(2, Math.min(5, Math.floor(plotW / 100)));
+  for (let k = 0; k < etiketSayisi; k++) {
+    const i = Math.round((k / (etiketSayisi - 1)) * (n - 1));
+    const t = svgEl('text', {
+      x: x(i), y: height - 6,
+      'text-anchor': k === 0 ? 'start' : k === etiketSayisi - 1 ? 'end' : 'middle',
+      fill: 'var(--text-dim)', 'font-size': 10,
+    });
+    t.textContent = fmtDateShort(rows[i].date);
+    svg.append(t);
+  }
+
+  container.append(svg);
+  container.append(h('div', { class: 'chart-legend' },
+    codes.map((kod, k) => h('span', { class: 'item' },
+      h('span', { class: 'swatch', style: `background:${colorAt(k)}` }), kod))));
+}
+
+/* ------------------------------------------------------------ dağılım grafiği */
+
+/**
+ * Risk-getiri dağılımı: x oynaklık, y getiri.
+ * @param {object} cfg points:[{x,y,label,highlight}], xLabel, yLabel
+ */
+export function scatterChart(container, cfg) {
+  const draw = () => renderScatter(container, cfg);
+  container.classList.add('chart');
+  draw();
+  onResize(container, draw);
+  return draw;
+}
+
+function renderScatter(container, cfg) {
+  const { points = [], height = 340, xLabel = '', yLabel = '', onPick } = cfg;
+  container.replaceChildren();
+  const veri = points.filter((p) => isNum(p.x) && isNum(p.y));
+  if (!veri.length) {
+    container.append(h('p', { class: 'dim', style: 'padding:24px 0;text-align:center' },
+      'Grafik için yeterli veri yok.'));
+    return;
+  }
+  const width = Math.max(container.clientWidth || 640, 280);
+  const pad = { top: 12, right: 14, bottom: 40, left: 56 };
+  const plotW = width - pad.left - pad.right;
+  const plotH = height - pad.top - pad.bottom;
+
+  const xs = veri.map((p) => p.x), ys = veri.map((p) => p.y);
+  let xMin = Math.min(...xs), xMax = Math.max(...xs);
+  let yMin = Math.min(...ys), yMax = Math.max(...ys);
+  const xPad = (xMax - xMin) * 0.05 || 1, yPad = (yMax - yMin) * 0.05 || 1;
+  xMin -= xPad; xMax += xPad; yMin -= yPad; yMax += yPad;
+  const X = (v) => pad.left + ((v - xMin) / (xMax - xMin)) * plotW;
+  const Y = (v) => pad.top + plotH - ((v - yMin) / (yMax - yMin)) * plotH;
+
+  const svg = svgEl('svg', { viewBox: `0 0 ${width} ${height}`, width: '100%', height });
+
+  for (const t of niceTicks(yMin, yMax, 5)) {
+    svg.append(svgEl('line', { x1: pad.left, x2: width - pad.right, y1: Y(t), y2: Y(t),
+      stroke: 'var(--border)', 'stroke-width': 1 }));
+    const el = svgEl('text', { x: pad.left - 7, y: Y(t) + 4, 'text-anchor': 'end',
+      fill: 'var(--text-dim)', 'font-size': 10 });
+    el.textContent = `%${Math.round(t)}`;
+    svg.append(el);
+  }
+  for (const t of niceTicks(xMin, xMax, 5)) {
+    const el = svgEl('text', { x: X(t), y: height - 22, 'text-anchor': 'middle',
+      fill: 'var(--text-dim)', 'font-size': 10 });
+    el.textContent = `%${Math.round(t)}`;
+    svg.append(el);
+  }
+  // Sıfır getiri çizgisi
+  if (yMin < 0 && yMax > 0) {
+    svg.append(svgEl('line', { x1: pad.left, x2: width - pad.right, y1: Y(0), y2: Y(0),
+      stroke: 'var(--text-dim)', 'stroke-width': 1, 'stroke-dasharray': '3 3', opacity: .6 }));
+  }
+
+  const eksenX = svgEl('text', { x: pad.left + plotW / 2, y: height - 5,
+    'text-anchor': 'middle', fill: 'var(--text-dim)', 'font-size': 11 });
+  eksenX.textContent = xLabel;
+  svg.append(eksenX);
+  const eksenY = svgEl('text', { x: 12, y: pad.top + plotH / 2, 'text-anchor': 'middle',
+    fill: 'var(--text-dim)', 'font-size': 11,
+    transform: `rotate(-90 12 ${pad.top + plotH / 2})` });
+  eksenY.textContent = yLabel;
+  svg.append(eksenY);
+
+  // Önce sıradan noktalar, sonra vurgulananlar (üstte kalsın).
+  for (const p of [...veri].sort((a, b) => Number(!!a.highlight) - Number(!!b.highlight))) {
+    const c = svgEl('circle', {
+      cx: X(p.x), cy: Y(p.y), r: p.highlight ? 6 : 3,
+      fill: p.highlight ? 'var(--accent)' : 'var(--text-dim)',
+      opacity: p.highlight ? 1 : .32,
+      stroke: p.highlight ? 'var(--surface)' : 'none',
+      'stroke-width': p.highlight ? 2 : 0,
+      style: onPick ? 'cursor:pointer' : null,
+    });
+    const t = svgEl('title');
+    t.textContent = `${p.label}: ${yLabel} %${p.y.toFixed(1)} · ${xLabel} %${p.x.toFixed(1)}`;
+    c.append(t);
+    if (onPick) c.addEventListener('click', () => onPick(p));
+    svg.append(c);
+
+    if (p.highlight) {
+      const et = svgEl('text', { x: X(p.x) + 9, y: Y(p.y) - 7, fill: 'var(--text)',
+        'font-size': 11, 'font-weight': 650 });
+      et.textContent = p.label;
+      svg.append(et);
+    }
+  }
+  container.append(svg);
+}
+
 export { colorAt };

@@ -152,7 +152,19 @@ export function setSetting(key, value) {
 /* ------------------------------------------------------------- yedekle / geri yükle */
 
 export function exportJSON() {
-  return JSON.stringify({ ...state, exportedAt: new Date().toISOString() }, null, 2);
+  // Yedek alındığı anı sakla ki kullanıcıya "en son ne zaman yedekledin"
+  // hatırlatması yapılabilsin.
+  const metin = JSON.stringify({ ...state, exportedAt: new Date().toISOString() }, null, 2);
+  state.settings.lastBackup = new Date().toISOString().slice(0, 10);
+  persist();
+  return metin;
+}
+
+/** Son yedekten bu yana geçen gün; hiç yedek alınmadıysa null. */
+export function daysSinceBackup() {
+  const son = state.settings.lastBackup;
+  if (!son) return null;
+  return Math.floor((Date.now() - new Date(`${son}T00:00:00`).getTime()) / 86400000);
 }
 
 /** Yedeği içe aktarır. mode: 'replace' | 'merge' */

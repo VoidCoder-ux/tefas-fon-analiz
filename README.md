@@ -18,13 +18,33 @@ risk metriklerini tek sayfada gösterir.
 
 | Sekme | İçerik |
 |---|---|
-| **Panel** | Toplam değer, günlük kazanç (₺ ve %), toplam kazanç, net yatırılan anapara, yıllık getiri (XIRR), portföy değeri grafiği, pozisyon tablosu |
-| **Dağılım** | Fon, kategori ve **gerçek varlık sınıfı** dağılımı (fonların içindeki hisse/tahvil/altın/mevduat kırılımı), fon başına kâr-zarar katkısı |
-| **Kıyaslama** | Portföy getirisinin BIST 100, gram altın, dolar ve (isteğe bağlı) enflasyon ile karşılaştırması |
-| **Risk** | Yıllık oynaklık, Sharpe oranı, maksimum düşüş, drawdown grafiği, fonlar arası korelasyon matrisi |
+| **Panel** | Toplam değer, günlük kazanç (₺ ve %), toplam kazanç, net yatırılan anapara, yıllık getiri (XIRR), portföy değeri grafiği, pozisyon tablosu, **zamanlama kalitesi**, **aylık yatırım akışı**, **yıllara göre gerçekleşen kâr**, **işlem tutarlılık denetimi** |
+| **Dağılım** | Fon, kategori ve **gerçek varlık sınıfı** dağılımı (fonların içindeki hisse/tahvil/altın/mevduat kırılımı), **puan bazlı kâr-zarar katkısı**, **ağırlık kayması** |
+| **Kıyaslama** | Portföy getirisinin BIST 100, gram altın, dolar, **para piyasası fonları** ve (isteğe bağlı) enflasyon ile karşılaştırması; **"aynı parayı başka yere koysaydım" senaryosu** |
+| **Risk** | Yıllık oynaklık, Sharpe oranı, maksimum düşüş, drawdown grafiği, **düşüş dökümü ve toparlanma süreleri**, **aylık getiri tablosu**, **yuvarlanan getiriler**, **etkin çeşitlendirme sayısı**, korelasyon matrisi |
 | **İşlemler** | Alım/satım girişi — fon ve tarihi seçince **birim fiyat TEFAS'tan otomatik gelir**; tutar yazınca adet kendiliğinden hesaplanır |
-| **Fonlar** | TEFAS'taki ~2.400 fonun tamamında arama, filtreleme, sıralama ve fon detayı |
-| **Ayarlar** | Profiller, tema, yedek al/yükle, Excel-CSV'den toplu işlem aktarma |
+| **Fonlar** | ~2.500 fonda arama ve filtreleme, **risk-getiri haritası**, **kategori içi sıralama**, **5 fona kadar karşılaştırma**, fon detayı (yuvarlanan getiri dahil) |
+| **Ayarlar** | Profiller, tema, yedek al/yükle (**yedek hatırlatması**), Excel-CSV'den toplu işlem aktarma |
+
+### Kararı destekleyen analizler
+
+Uygulama **öneri vermez**; veriden hesaplanan, elle doğrulanabilir olgular sunar.
+Örneğin:
+
+- **Zamanlama kalitesi** — ortalama alım fiyatın, o fonu tuttuğun dönemin ortalama
+  piyasa fiyatının altında mı üstünde mi?
+- **Düşüş dökümü** — en derin geri çekilmelerin ne kadar sürdüğü ve eski zirveye
+  dönmesinin kaç gün aldığı.
+- **Yuvarlanan getiriler** — geçmişteki *tüm* 1 yıllık dönemlerin en iyi/ortanca/en
+  kötüsü; tek bir şanslı dönemi tutarlılıktan ayırır.
+- **Etkin çeşitlendirme** — fonların korelasyonu hesaba katıldığında kaç bağımsız
+  bahis tuttuğun.
+- **Karşı-olgusal senaryo** — senin gerçek tarih ve tutarlarınla aynı parayı BIST 100,
+  altın, dolar veya para piyasası fonuna koysaydın bugün ne olurdu.
+- **Kategori içi sıralama** — fonun kendi TEFAS kategorisindeki yeri (örn. 186 hisse
+  fonu içinde 12. sırada).
+- **İşlem tutarlılık denetimi** — girdiğin fiyatı o günün gerçek TEFAS fiyatıyla
+  karşılaştırıp yazım hatalarını ve mükerrer kayıtları yakalar.
 
 Üst çubuktaki **↻** düğmesi verileri sunucudan yeniden çeker. Telefonda "Ana Ekrana
 Ekle" ile uygulama gibi kullanıldığında tarayıcı arayüzü olmadığı için sayfayı
@@ -91,6 +111,7 @@ hızlı açılır.
 |---|---|---|
 | Fon fiyatları, portföy büyüklüğü, yatırımcı sayısı | `tefas.gov.tr/api/funds/fonGnlBlgSiraliGetir` | Hayır |
 | Fonların varlık dağılımı | `tefas.gov.tr/api/funds/dagilimSiraliGetirT` | Hayır |
+| Resmi fon kategorileri | `tefas.gov.tr/api/funds/fonTurGetir` + tür filtresi | Hayır |
 | BIST 100, USD/TRY, ons altın | Yahoo Finance chart API | Hayır |
 | TÜFE (enflasyon) | TCMB EVDS | **Evet** (ücretsiz, aşağıya bak) |
 
@@ -164,7 +185,10 @@ assets/js/
   data.js                  JSON veri yükleme, tembel fon geçmişi
   store.js                 localStorage: profiller, işlemler, ayarlar
   portfolio.js             maliyet, kâr/zarar, TWR, XIRR, risk metrikleri
-  charts.js                bağımlılıksız SVG grafikler
+  charts.js                bağımlılıksız SVG grafikler (çizgi, halka, çubuk,
+                           yığılmış alan, dağılım, ısı tablosu)
+  insights.js              düşüş dökümü, katkı, zamanlama, çeşitlendirme,
+                           yuvarlanan getiri, karşı-olgusal senaryo, denetimler
   util.js                  biçimlendirme (₺, %, tarih) ve DOM yardımcıları
   views/                   sekme başına bir dosya
 scripts/

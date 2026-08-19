@@ -1,0 +1,2 @@
+# Depoda satır sonları LF olarak tutulur (Windows/Linux karışık geliştirme için)
+* text=auto eol=lf

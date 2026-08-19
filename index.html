@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<meta name="description" content="TEFAS fonları için portföy takip ve analiz uygulaması. Günlük ve toplam kazanç, dağılım, kıyaslama ve risk analizi.">
+<title>TEFAS Fon Analiz</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📊</text></svg>">
+<link rel="stylesheet" href="assets/css/style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">
+      <span class="brand-mark">₺</span>
+      <span class="brand-text">TEFAS Fon Analiz</span>
+    </div>
+
+    <div class="topbar-actions">
+      <label class="profile-picker">
+        <span class="sr-only">Profil</span>
+        <select id="profileSelect" aria-label="Profil seç"></select>
+      </label>
+      <button id="themeBtn" class="icon-btn" type="button" title="Tema değiştir" aria-label="Tema değiştir">◐</button>
+    </div>
+  </div>
+
+  <nav class="tabs" id="tabs" role="tablist">
+    <button class="tab" role="tab" data-view="panel">Panel</button>
+    <button class="tab" role="tab" data-view="dagilim">Dağılım</button>
+    <button class="tab" role="tab" data-view="kiyaslama">Kıyaslama</button>
+    <button class="tab" role="tab" data-view="risk">Risk</button>
+    <button class="tab" role="tab" data-view="islemler">İşlemler</button>
+    <button class="tab" role="tab" data-view="fonlar">Fonlar</button>
+    <button class="tab" role="tab" data-view="ayarlar">Ayarlar</button>
+  </nav>
+</header>
+
+<main id="app" class="app">
+  <div class="loading" id="boot">
+    <div class="spinner" aria-hidden="true"></div>
+    <p>TEFAS verileri yükleniyor…</p>
+  </div>
+</main>
+
+<footer class="footer">
+  <p id="dataStatus">—</p>
+  <p class="disclaimer">
+    Bu araç yalnızca kişisel takip amaçlıdır, yatırım tavsiyesi değildir.
+    Veriler TEFAS'ın herkese açık uçlarından alınır; hesaplamalar bilgilendirme amaçlıdır,
+    resmî kayıt yerine geçmez. Portföy bilgileriniz yalnızca bu tarayıcıda saklanır.
+  </p>
+</footer>
+
+<div id="modalRoot" class="modal-root" hidden></div>
+<div id="toastRoot" class="toast-root" aria-live="polite"></div>
+
+<script type="module" src="assets/js/app.js"></script>
+</body>
+</html>

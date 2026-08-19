@@ -1,0 +1,17 @@
+# Ham veri deposu (GitHub Actions cache'inde taşınır, depoya girmez)
+data/
+
+# Üretilen site (Pages'e artifact olarak yüklenir)
+dist/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Editör / işletim sistemi
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

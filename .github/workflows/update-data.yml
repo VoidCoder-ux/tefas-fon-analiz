@@ -1,0 +1,93 @@
+name: Veri güncelle ve yayınla
+
+# TEFAS fiyatlarını her akşam çeker, siteyi üretir ve GitHub Pages'e yayınlar.
+# Ham veri depoya commit edilmez; iki çalıştırma arasında Actions cache'inde
+# saklanır. Böylece depo küçük kalır ve her gün yalnızca eksik günler çekilir.
+
+on:
+  schedule:
+    # TEFAS fiyatları akşam yayımlanır. 19:10 UTC = 22:10 TR saati.
+    - cron: '10 19 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      full:
+        description: 'Veriyi baştan çek (cache yok sayılır)'
+        type: boolean
+        default: false
+      years:
+        description: 'Kaç yıllık geçmiş tutulsun'
+        default: '3'
+  push:
+    branches: [main]
+    paths:
+      - 'index.html'
+      - 'assets/**'
+      - 'scripts/**'
+      - '.github/workflows/update-data.yml'
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Aynı anda tek yayın çalışsın; sıradaki çalışma öncekini iptal etmesin.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # Ham fiyat deposu (SQLite) çalışmalar arasında cache'te taşınır.
+      # Anahtar her çalışmada yeni olur; restore-keys en son kaydı geri yükler.
+      - name: Veri deposunu geri yükle
+        if: ${{ github.event.inputs.full != 'true' }}
+        uses: actions/cache/restore@v4
+        with:
+          path: data
+          key: tefas-db-${{ github.run_id }}
+          restore-keys: |
+            tefas-db-
+
+      - name: TEFAS verisini güncelle ve siteyi üret
+        env:
+          TEFAS_YEARS: ${{ github.event.inputs.years || '3' }}
+          # İsteğe bağlı: TÜFE (enflasyon) kıyası için ücretsiz EVDS anahtarı.
+          EVDS_API_KEY: ${{ secrets.EVDS_API_KEY }}
+          PYTHONIOENCODING: utf-8
+        run: |
+          python scripts/update.py \
+            --years "${TEFAS_YEARS}" \
+            --delay 3.0 \
+            ${{ github.event.inputs.full == 'true' && '--full' || '' }}
+
+      - name: Veri deposunu kaydet
+        uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: data
+          key: tefas-db-${{ github.run_id }}
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

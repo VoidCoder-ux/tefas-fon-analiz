@@ -1,0 +1,237 @@
+/* Ayarlar: profiller, tema, yedekleme ve veri durumu. */
+
+import {
+  h, toast, confirmDialog, downloadText, fmtDate, isNum, openModal,
+} from '../util.js';
+import { DB } from '../data.js';
+import {
+  profiles, activeProfileId, addProfile, renameProfile, removeProfile,
+  settings, setSetting, exportJSON, importJSON, resetAll, addTransaction,
+  allTransactions,
+} from '../store.js';
+import { sectionCard } from './common.js';
+
+/**
+ * Sayıyı hem Türkçe hem İngilizce yazımdan okur.
+ * Virgül varsa Türkçe kabul edilir ("1.234,56"); yoksa nokta ondalık ayracıdır
+ * ("1234.56"), böylece "1,234567" gibi fiyatlar da doğru okunur.
+ */
+function parseNumber(raw) {
+  const text = String(raw ?? '').trim();
+  if (!text) return NaN;
+  return Number(text.includes(',') ? text.replace(/\./g, '').replace(',', '.') : text);
+}
+
+/** "kod;tarih;tür;adet;fiyat;masraf" satırlarını işleme alır. */
+function parseCSV(text) {
+  const rows = [];
+  const errors = [];
+  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+
+  lines.forEach((line, i) => {
+    // Başlık satırını atla.
+    if (i === 0 && /kod|fon/i.test(line) && /tarih/i.test(line)) return;
+    const parts = line.split(/[;,\t]/).map((s) => s.trim());
+    if (parts.length < 5) { errors.push(`${i + 1}. satır: en az 5 sütun olmalı`); return; }
+
+    const [rawCode, rawDate, rawType, rawUnits, rawPrice, rawFee] = parts;
+    const code = rawCode.toLocaleUpperCase('tr');
+    if (!DB.byCode.get(code)) { errors.push(`${i + 1}. satır: ${code} bulunamadı`); return; }
+
+    let date = rawDate;
+    const dotted = rawDate.match(/^(\d{2})[./](\d{2})[./](\d{4})$/);
+    if (dotted) date = `${dotted[3]}-${dotted[2]}-${dotted[1]}`;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) { errors.push(`${i + 1}. satır: tarih okunamadı`); return; }
+
+    const type = /^s/i.test(rawType) ? 'SAT' : 'AL';
+    const units = parseNumber(rawUnits);
+    const price = parseNumber(rawPrice);
+    const fee = parseNumber(rawFee || '0') || 0;
+    if (!(units > 0) || !(price > 0)) { errors.push(`${i + 1}. satır: adet/fiyat geçersiz`); return; }
+
+    rows.push({ code, date, type, units, price, fee });
+  });
+
+  return { rows, errors };
+}
+
+function csvImportDialog(onDone) {
+  const area = h('textarea', {
+    rows: '10', placeholder: 'AAK;15.03.2026;AL;1250,5;1,234567;0',
+    style: 'width:100%;font-family:var(--mono);font-size:.82rem;padding:10px;'
+      + 'border:1px solid var(--border);border-radius:9px;background:var(--surface);',
+  });
+  const result = h('div', { class: 'stack' });
+
+  const body = h('div', { class: 'stack' },
+    h('p', { class: 'dim', style: 'margin:0' },
+      'Her satır bir işlem: fon kodu; tarih; tür (AL/SAT); adet; birim fiyat; masraf. '
+      + 'Ayraç olarak noktalı virgül, virgül veya sekme kullanabilirsin. '
+      + 'Excel\'den kopyalayıp yapıştırabilirsin.'),
+    area,
+    result,
+    h('div', { class: 'btn-row', style: 'justify-content:flex-end' },
+      h('button', {
+        class: 'btn btn-primary', type: 'button',
+        onclick: () => {
+          const { rows, errors } = parseCSV(area.value);
+          result.replaceChildren();
+          if (errors.length) {
+            result.append(h('div', { class: 'notice warn' },
+              h('b', {}, `${errors.length} satır atlandı:`),
+              h('div', { style: 'margin-top:4px;font-size:.8rem' }, errors.slice(0, 8).join(' · '))));
+          }
+          if (!rows.length) {
+            result.append(h('div', { class: 'notice warn' }, 'İçe aktarılacak geçerli satır yok.'));
+            return;
+          }
+          rows.forEach(addTransaction);
+          toast(`${rows.length} işlem eklendi`);
+          onDone?.();
+        },
+      }, 'İçe Aktar')));
+
+  return body;
+}
+
+export function renderAyarlar(ctx) {
+  const root = h('div', { class: 'stack' });
+  const cfg = settings();
+
+  /* ------------------------------------------------------------------ profiller */
+
+  const profileRows = profiles().map((p) => {
+    const nameInput = h('input', { type: 'text', value: p.name, style: 'flex:1 1 160px' });
+    nameInput.addEventListener('change', () => {
+      renameProfile(p.id, nameInput.value);
+      toast('Profil adı güncellendi');
+      ctx.refresh();
+    });
+    const txCount = allTransactions().filter((t) => t.profile === p.id).length;
+    return h('div', {
+      style: 'display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:8px 0;'
+        + 'border-bottom:1px solid var(--border)',
+    },
+    nameInput,
+    h('span', { class: 'dim', style: 'font-size:.8rem' }, `${txCount} işlem`),
+    p.id === activeProfileId() ? h('span', { class: 'pill' }, 'aktif') : null,
+    h('button', {
+      class: 'btn btn-sm btn-danger', type: 'button',
+      disabled: profiles().length <= 1,
+      onclick: async () => {
+        const ok = await confirmDialog('Profili sil',
+          `"${p.name}" profili ve içindeki ${txCount} işlem kalıcı olarak silinecek.`,
+          { danger: true, okLabel: 'Sil' });
+        if (ok) { removeProfile(p.id); toast('Profil silindi'); ctx.refresh(); }
+      },
+    }, 'Sil'));
+  });
+
+  const newName = h('input', { type: 'text', placeholder: 'Örn. Annem', style: 'flex:1 1 160px' });
+  const addBtn = h('button', {
+    class: 'btn btn-primary', type: 'button',
+    onclick: () => {
+      if (!newName.value.trim()) { toast('Bir isim yaz'); return; }
+      addProfile(newName.value);
+      toast('Profil eklendi');
+      ctx.refresh();
+    },
+  }, 'Profil Ekle');
+
+  root.append(sectionCard('Profiller',
+    'Her aile bireyi için ayrı portföy tut; üstteki menüden geçiş yap',
+    h('div', {}, profileRows),
+    h('div', { style: 'display:flex;gap:8px;margin-top:12px;flex-wrap:wrap' }, newName, addBtn)));
+
+  /* ---------------------------------------------------------------------- görünüm */
+
+  const themeSel = h('select', {},
+    h('option', { value: 'auto', selected: cfg.theme === 'auto' }, 'Sistem ayarı'),
+    h('option', { value: 'light', selected: cfg.theme === 'light' }, 'Açık'),
+    h('option', { value: 'dark', selected: cfg.theme === 'dark' }, 'Koyu'));
+  themeSel.addEventListener('change', () => {
+    setSetting('theme', themeSel.value);
+    ctx.applyTheme();
+  });
+
+  root.append(sectionCard('Görünüm', null,
+    h('div', { class: 'form-grid' },
+      h('div', { class: 'field' }, h('label', {}, 'Tema'), themeSel))));
+
+  /* -------------------------------------------------------------------- yedekleme */
+
+  const fileInput = h('input', { type: 'file', accept: '.json,application/json', hidden: true });
+  fileInput.addEventListener('change', async () => {
+    const file = fileInput.files?.[0];
+    if (!file) return;
+    const text = await file.text();
+    const mode = await confirmDialog('Yedeği içe aktar',
+      'Mevcut verinin üzerine yazılsın mı? "Onayla" üzerine yazar, "Vazgeç" mevcut verinin '
+      + 'üstüne ekler (birleştirir).',
+      { okLabel: 'Üzerine yaz' });
+    try {
+      const count = importJSON(text, mode ? 'replace' : 'merge');
+      toast(`${count} işlem içe aktarıldı`);
+      ctx.refresh();
+    } catch (err) {
+      toast(`İçe aktarılamadı: ${err.message}`);
+    }
+    fileInput.value = '';
+  });
+
+  root.append(sectionCard('Yedekleme',
+    'Veriler yalnızca bu tarayıcıda tutulur - düzenli yedek al',
+    h('p', { class: 'dim', style: 'margin:0 0 12px;font-size:.86rem' },
+      'Yedek dosyasını başka bir cihazda içe aktararak portföyünü taşıyabilirsin. '
+      + 'Aile bireyleri kendi cihazlarında kendi verilerini tutar; istersen yedeği paylaşarak '
+      + 'aynı portföyü herkesin görmesini sağlayabilirsin.'),
+    h('div', { class: 'btn-row' },
+      h('button', {
+        class: 'btn btn-primary', type: 'button',
+        onclick: () => {
+          downloadText(`tefas-portfoy-${new Date().toISOString().slice(0, 10)}.json`, exportJSON());
+          toast('Yedek indirildi');
+        },
+      }, '↓ Yedeği İndir'),
+      h('button', { class: 'btn', type: 'button', onclick: () => fileInput.click() },
+        '↑ Yedekten Yükle'),
+      h('button', {
+        class: 'btn', type: 'button',
+        onclick: () => {
+          const close = openModal('Toplu İşlem İçe Aktar',
+            csvImportDialog(() => { close(); ctx.refresh(); }));
+        },
+      }, 'Excel/CSV\'den Ekle'),
+      fileInput)));
+
+  /* ----------------------------------------------------------------- veri durumu */
+
+  const meta = DB.meta || {};
+  root.append(sectionCard('Veri Durumu', null,
+    h('div', { class: 'table-wrap' }, h('table', {}, h('tbody', {},
+      h('tr', {}, h('td', {}, 'Son fiyat günü'), h('td', {}, fmtDate(meta.lastDataDate))),
+      h('tr', {}, h('td', {}, 'Veri başlangıcı'), h('td', {}, fmtDate(meta.firstDataDate))),
+      h('tr', {}, h('td', {}, 'Kapsanan fon sayısı'), h('td', {},
+        isNum(meta.fundCount) ? String(meta.fundCount) : String(DB.funds.length))),
+      h('tr', {}, h('td', {}, 'İşlem günü sayısı'), h('td', {}, String(meta.days ?? '—'))),
+      h('tr', {}, h('td', {}, 'Kıyaslama serileri'), h('td', {},
+        (meta.benchmarks || []).join(', ') || '—')),
+      h('tr', {}, h('td', {}, 'Veri üretim zamanı'), h('td', {},
+        meta.built ? new Date(meta.built).toLocaleString('tr-TR') : '—')))))));
+
+  /* -------------------------------------------------------------------- sıfırlama */
+
+  root.append(sectionCard('Tehlikeli Bölge', null,
+    h('div', { class: 'btn-row' },
+      h('button', {
+        class: 'btn btn-danger', type: 'button',
+        onclick: async () => {
+          const ok = await confirmDialog('Her şeyi sil',
+            'Tüm profiller ve işlemler kalıcı olarak silinecek. Önce yedek almanı öneririm.',
+            { danger: true, okLabel: 'Hepsini sil' });
+          if (ok) { resetAll(); toast('Tüm veriler silindi'); ctx.refresh(); }
+        },
+      }, 'Tüm Verileri Sil'))));
+
+  return root;
+}

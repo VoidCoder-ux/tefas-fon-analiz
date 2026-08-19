@@ -5,7 +5,7 @@ Günlük ve toplam kazancını, portföy dağılımını, BIST 100 / altın / do
 risk metriklerini tek sayfada gösterir.
 
 - **Kurulum gerektirmez** — GitHub Pages'te yayınlanan statik bir site, telefondan da açılır.
-- **Veriler her akşam otomatik güncellenir** — GitHub Actions TEFAS'tan fiyatları çeker.
+- **Veriler hafta içi her gün otomatik güncellenir** — GitHub Actions TEFAS'tan fiyatları çeker.
 - **Portföy bilgin sende kalır** — işlemlerin yalnızca kendi tarayıcının belleğinde
   (localStorage) tutulur, hiçbir sunucuya gönderilmez. Depo herkese açık olsa bile
   kimse portföyünü göremez.
@@ -64,7 +64,7 @@ saklanır, birbirini görmez. Aynı portföyü paylaşmak isterseniz **Ayarlar �
 ## Nasıl çalışıyor?
 
 ```
-GitHub Actions (her akşam 22:10 TR)
+GitHub Actions (hafta içi 10:45 ve 22:10 TR)
   ├─ TEFAS API'sinden eksik günleri çek        scripts/tefas.py
   ├─ SQLite deposuna yaz (Actions cache'inde)  scripts/update.py
   ├─ Kıyas serilerini çek (Yahoo, TCMB EVDS)   scripts/benchmarks.py
@@ -184,7 +184,8 @@ Yedek dosyasını indirip diğer cihazda yükleyerek. Otomatik eşitleme yok (bu
 hiçbir yere göndermemenin bedeli).
 
 **Fon fiyatı neden bugün güncel değil?**
-TEFAS fiyatları akşam yayımlar; iş akışı 22:10'da çalışır. Hafta sonu ve resmî
+TEFAS fiyatları sabah (~10:00 TR) açıklıyor; iş akışı hafta içi 10:45'te çalışıp
+veriyi çekiyor, 22:10'da bir kez daha kontrol ediyor. Hafta sonu ve resmî
 tatillerde yeni fiyat yayımlanmaz.
 
 **Emeklilik (BES) fonlarım da var.**

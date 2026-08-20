@@ -89,7 +89,8 @@ saklanır, birbirini görmez. Aynı portföyü paylaşmak isterseniz **Ayarlar �
 ## Nasıl çalışıyor?
 
 ```
-GitHub Actions (hafta içi 10:23 ve 19:22 TR)
+GitHub Actions (hafta içi 09:00-11:50 arası 10 dk'da bir + 19:00 TR)
+  ├─ Yeni fiyat var mı, ucuz ön kontrol        scripts/check_fresh.py
   ├─ TEFAS API'sinden eksik günleri çek        scripts/tefas.py
   ├─ SQLite deposuna yaz (Actions cache'inde)  scripts/update.py
   ├─ Kıyas serilerini çek (Yahoo, TCMB EVDS)   scripts/benchmarks.py
@@ -192,6 +193,7 @@ assets/js/
   util.js                  biçimlendirme (₺, %, tarih) ve DOM yardımcıları
   views/                   sekme başına bir dosya
 scripts/
+  check_fresh.py           derleme gerekli mi ön kontrolü
   tefas.py                 TEFAS API istemcisi
   benchmarks.py            BIST 100 / altın / dolar / TÜFE
   buckets.py               varlık dağılımı gruplaması
@@ -219,10 +221,23 @@ TEFAS bir günün fiyatını sabah bir kez açıklıyor ve o fiyat gün boyu de�
 dolayısıyla her açılışta sorgulamak aynı sayıları geri getirirdi. Uygulama, bugünün
 fiyatı henüz yansımamışsa üstte bir uyarı göstererek seni bilgilendirir.
 
-**Fon fiyatı neden bugün güncel değil?**
-TEFAS fiyatları sabah (~10:00 TR) açıklıyor; iş akışı hafta içi 10:23'te çalışıp
-veriyi çekiyor, 19:22'de doğrulama turu yapıyor. Hafta sonu ve resmî tatillerde
-yeni fiyat yayımlanmaz.
+**Fon fiyatı ne zaman güncelleniyor?**
+Fon pay fiyatı borsa kapanışından sonra hesaplanıp ertesi işlem günü sabahı
+Takasbank sistemine tanımlanır. TEFAS'ta talimat kabulü 09:00'da başlar ve
+[TEFAS Uygulama Esasları](https://www.takasbank.com.tr/documents/prosedurler/tefas-uygulama-esaslari-17012020.pdf)
+MADDE 13(2) uyarınca saat 09:30 itibarıyla fiyatı tanımlanmamış fonlar için
+operatör üyesine uyarı gönderilir - yani günün fiyatı **09:00-09:30 (TR)**
+arasında yayında olur.
+
+İş akışı bu yüzden tek bir saate güvenmiyor: hafta içi 09:00-11:50 arası
+10 dakikada bir yokluyor. Her yoklama önce saniyeler süren bir ön kontrol
+çalıştırıyor; yayındaki site zaten bugünün fiyatındaysa ya da TEFAS henüz
+yayımlamadıysa derleme yapılmıyor. Böylece fiyat açıklandıktan en geç ~15
+dakika sonra sitede oluyor ve GitHub'ın zamanlanmış iş gecikmesi (tek bir
+cron 40 dakikaya varan gecikmeyle tetiklenebiliyor) tek başına gününü
+bozmuyor. 19:00'daki doğrulama turu, gün içinde yayımlanan fiyat
+düzeltmelerini yakalıyor. Hafta sonu ve resmî tatillerde yeni fiyat
+yayımlanmaz.
 
 **Emeklilik (BES) fonlarım da var.**
 Varsayılan olarak dahil (`YAT,EMK,BYF`). Fon kodunu yazman yeterli.

@@ -1,21 +1,32 @@
 name: Veri güncelle ve yayınla
 
-# TEFAS fiyatlarını her akşam çeker, siteyi üretir ve GitHub Pages'e yayınlar.
-# Ham veri depoya commit edilmez; iki çalıştırma arasında Actions cache'inde
-# saklanır. Böylece depo küçük kalır ve her gün yalnızca eksik günler çekilir.
+# TEFAS fiyatlarını her işlem günü sabah çeker, siteyi üretir ve GitHub Pages'e
+# yayınlar. Ham veri depoya commit edilmez; iki çalıştırma arasında Actions
+# cache'inde saklanır. Böylece depo küçük kalır ve her gün yalnızca eksik
+# günler çekilir.
 
 on:
   schedule:
-    # TEFAS fiyatları sabah (~10:00 TR) açıklanıyor ve gün boyu sabit kalıyor.
-    # Türkiye tüm yıl UTC+3'tür (yaz saati uygulaması yok), saatler kaymaz.
+    # NE ZAMAN AÇIKLANIYOR?
+    # Fon pay fiyatları borsa kapanışından sonra hesaplanır ve ertesi işlem
+    # günü sabahı Takasbank sistemine tanımlanır. TEFAS Uygulama Esasları
+    # MADDE 13(2): "Saat 09:30 itibariyle fiyat bilgisi tanımlanmayan fonların
+    # operatör üyesine elektronik ortamda uyarı mesajı gönderilir." Talimat
+    # kabulü de 09:00'da başlıyor (MADDE 11). Yani günün fiyatı 09:00-09:30
+    # (TR) arasında yayında oluyor. Türkiye tüm yıl UTC+3'tür, saatler kaymaz.
     #
-    # 07:23 UTC = 10:23 TR - asıl güncelleme, fiyat açıklanır açıklanmaz.
-    # Tam/yarım saat yerine tek bir dakika seçildi: GitHub'ın zamanlanmış iş
-    # kuyruğu :00 ve :30'da yoğunlaşıyor, ara dakikalar daha az gecikiyor.
-    - cron: '23 7 * * 1-5'
-    # 16:22 UTC = 19:22 TR - doğrulama turu: sabahki çalışma gecikir, atlanır
-    # ya da fiyat sonradan düzeltilirse aynı gün içinde yakalanır.
-    - cron: '22 16 * * 1-5'
+    # NEDEN TEK BİR CRON YETMİYOR?
+    # GitHub zamanlanmış işleri "en iyi çaba" ile tetikliyor: tek bir cron
+    # 40 dakikaya varan gecikmeyle başlayabiliyor, hatta atlanabiliyor. Tek
+    # sefere güvenmek yerine sabah boyunca yokluyoruz; her yoklama önce
+    # `kontrol` işini çalıştırıyor, bu iş saniyeler sürüyor ve yalnızca
+    # gerçekten yeni fiyat varsa tam derlemeyi tetikliyor.
+    #
+    # 06:00-08:50 UTC = 09:00-11:50 TR, 10 dakikada bir.
+    - cron: '*/10 6-8 * * 1-5'
+    # 16:00 UTC = 19:00 TR - doğrulama turu: TEFAS gün içinde fiyat düzeltmesi
+    # yayımlarsa ya da sabahki tur tümüyle atlandıysa aynı gün yakalanır.
+    - cron: '0 16 * * 1-5'
   workflow_dispatch:
     inputs:
       full:
@@ -44,7 +55,40 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Ucuz ön kontrol: sabah yoklamaları 10 dakikada bir çalıştığı için tam
+  # derlemeyi (~5 dk) her seferinde tetiklemek israf olur. Bu iş saniyeler
+  # içinde "yayındaki site zaten bugünün fiyatında mı" ve "TEFAS bugünün
+  # fiyatını yayımlamış mı" sorularını yanıtlar; ancak ikisi de uygunsa
+  # derleme başlar. Tatil günlerinde hiç derleme yapılmaz.
+  kontrol:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      run: ${{ steps.karar.outputs.run }}
+      reason: ${{ steps.karar.outputs.reason }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - id: karar
+        env:
+          SITE_URL: ${{ format('https://{0}.github.io/{1}', github.repository_owner, github.event.repository.name) }}
+          PYTHONIOENCODING: utf-8
+        run: |
+          python scripts/check_fresh.py \
+            --site-url "${SITE_URL}" \
+            ${{ github.event.schedule == '0 16 * * 1-5' && '--force-refresh' || '' }}
+      - name: Kararı özete yaz
+        env:
+          REASON: ${{ steps.karar.outputs.reason }}
+        run: echo "$REASON" >> "$GITHUB_STEP_SUMMARY"
+
   build:
+    needs: kontrol
+    # Zamanlanmış turlarda yalnızca yeni fiyat varsa derle; elle tetikleme ve
+    # kod değişikliği (push) her hâlükârda yayınlanmalı.
+    if: ${{ github.event_name != 'schedule' || needs.kontrol.outputs.run == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:

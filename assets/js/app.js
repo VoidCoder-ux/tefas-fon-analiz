@@ -53,10 +53,14 @@ function istanbulNow() {
 /**
  * Gösterilen fiyatlar bugünün fiyatı değilse kullanıcıyı bilgilendirir.
  *
- * TEFAS fiyatları sabah ~10:00'da açıklıyor ve gün boyu değişmiyor; otomatik
- * güncelleme 10:23'te çalışıyor. Saat 11:00'ı geçtiği hâlde bugünün verisi
- * yoksa ya resmî tatil ya da güncelleme gecikmiş demektir. Sessizce eski
- * fiyatı göstermek yerine bunu açıkça söylüyoruz.
+ * TEFAS fon pay fiyatları her işlem günü sabah Takasbank sistemine tanımlanır:
+ * talimat kabulü 09:00'da başlıyor ve TEFAS Uygulama Esasları MADDE 13(2)
+ * uyarınca 09:30 itibarıyla fiyatı tanımlanmamış fonlar için operatör üyesine
+ * uyarı gidiyor. Otomatik güncelleme 09:00-11:50 arası 10 dakikada bir
+ * yokluyor, yani fiyat yayımlandıktan en geç ~15 dakika sonra sitede oluyor.
+ * Saat 10:00'ı geçtiği hâlde bugünün verisi yoksa ya resmî tatil ya da
+ * güncelleme gecikmiş demektir. Sessizce eski fiyatı göstermek yerine bunu
+ * açıkça söylüyoruz.
  */
 function stalenessNotice() {
   const last = DB.meta.lastDataDate;
@@ -64,7 +68,7 @@ function stalenessNotice() {
   const { date, minutes, weekday } = istanbulNow();
   if (last >= date) return null;                       // bugünün verisi mevcut
   const isWeekday = weekday >= 1 && weekday <= 5;
-  if (!isWeekday || minutes < 11 * 60) return null;    // hafta sonu ya da daha erken
+  if (!isWeekday || minutes < 10 * 60) return null;    // hafta sonu ya da daha erken
 
   return h('div', { class: 'notice warn', style: 'margin-bottom:14px' },
     h('b', {}, 'Bugünün fiyatları henüz yansımadı. '),
